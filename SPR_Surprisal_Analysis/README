@@ -1,0 +1,36 @@
+Scripts to get single word frequency and bigram surprisal of sentences
+MH, written 2022
+updated for SPR Surprisal Analysis by ZC Jan 2024
+
+Dictionaries: 
+
+- wordDict.pickle = contains frequency values for single words
+
+- gramDict_combined.pickle = contains frequency values for single words AND surprisal values for bigrams
+
+Scripts:
+
+- getngrams.py = series of functions you need to interface with the Google ngrams corpus. Found this on github, was written by someone else
+
+- getngrams_dict_freq.py = populate your wordDict dictionary with frequency of single words in your stimuli
+	- format: wordDict[word] = [prob, -log(prob)]
+
+- getngrams_dict_surprisal.py = populate your gramDict_combined dictionary with surprisal of bigrams in your stimuli
+
+- calculate_avgfreq.py = calculate average frequency within and across sentences
+
+- calculate_avgsurprisal.py = calculate average surprisal within and across sentences
+
+CSVs:
+
+- curr_stim.csv = the stimuli you want to analyze
+
+- failed_grams.csv = a list of bigrams from my stimuli that did not show up in the corpus. Might be helpful to compare to your stimuli if you run into a similar problem
+
+- wordfreq_results.csv = example of what word frequency results look like
+
+- surprisal_results_2grams.csv = example of what bigram surprisal results look like
+
+
+
+

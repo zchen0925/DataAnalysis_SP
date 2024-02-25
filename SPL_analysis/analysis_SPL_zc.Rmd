@@ -1,0 +1,1566 @@
+---
+title: "SPL analysis"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+date: "2023-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r sourceCode, echo = FALSE}
+source("./SP_filter_plot.R")
+load("./FINAL_SPL_CB_filtered.RData")
+load("./FINAL_SPL_SC_filtered.RData")
+#load("./FINAL_SPL_YS_filtered.RData")
+library(nortest)
+library(janitor)
+library(data.table)
+library("gridExtra") 
+library("lme4")
+library("lmerTest")
+#library("nlme")
+library("plotrix") 
+#library("tidyverse")
+library("readxl")
+#detach(package:plyr)
+```
+
+
+cleaning up
+```{r}
+final_SPL_CB_Q$"RT+Duration" = final_SPL_CB_Q$"RT+dur(secs)"
+final_SPL_CB_Q = final_SPL_CB_Q[, !names(final_SPL_CB_Q) %in% c("RT+dur(secs)")]
+
+final_SPL_CB_S$"RT+Duration" = final_SPL_CB_S$"RT+dur(secs)"
+final_SPL_CB_S = final_SPL_CB_S[, !names(final_SPL_CB_S) %in% c("RT+dur(secs)")]
+
+final_SPL_SC_S$Item <- ifelse(final_SPL_SC_S$CONDITION == "NMV" & nchar(final_SPL_SC_S$Item)==9, gsub("NO-MOVE", "NMV",final_SPL_SC_S$Item), gsub("NO-MOVE", "NMV0",final_SPL_SC_S$Item))
+final_SPL_SC_S$Item <- ifelse(final_SPL_SC_S$CONDITION == "MV" & nchar(final_SPL_SC_S$Item)==6, gsub("MOVE", "MV",final_SPL_SC_S$Item), gsub("MOVE", "MV0",final_SPL_SC_S$Item))
+final_SPL_SC_S$Item <- ifelse(final_SPL_SC_S$CONDITION == "GP" & nchar(final_SPL_SC_S$Item)==6, gsub("GPLG", "GP",final_SPL_SC_S$Item), gsub("GPLG", "GP0",final_SPL_SC_S$Item))
+final_SPL_SC_S$Item <- ifelse(final_SPL_SC_S$CONDITION == "NGP" & nchar(final_SPL_SC_S$Item)==6, gsub("NGLG", "NGP",final_SPL_SC_S$Item), gsub("NGLG", "NGP0",final_SPL_SC_S$Item))
+
+```
+
+aligning move segments:import dictionary of segment positions
+```{r}
+mv_VP_POST_dict <- read_excel("verbs_post_seg_mv.xlsx", sheet = "VP_POST")
+mv_VP_POST_dict$Condition <- ifelse(startsWith(mv_VP_POST_dict$Sent_ID, "NO-MOVE"), "NMV", "MV")
+mv_VP_POST_dict$VP1 <- gsub("seg", "seg0",tolower(mv_VP_POST_dict$VP1))
+#mv_VP_POST_dict$VP1 <- as.list(strsplit(mv_VP_POST_dict$VP1, ","))
+mv_VP_POST_dict$Adv <- gsub("seg", "seg0",tolower(mv_VP_POST_dict$Adv))
+mv_VP_POST_dict$VP2 <- gsub("seg", "seg0",tolower(mv_VP_POST_dict$VP2))
+mv_VP_POST_dict$Post <- gsub("seg", "seg0", tolower(mv_VP_POST_dict$Post))
+mv_VP_POST_dict$Sent_ID <- ifelse(mv_VP_POST_dict$Condition == "NMV" & nchar(mv_VP_POST_dict$Sent_ID)==9, gsub("NO-MOVE", "NMV",mv_VP_POST_dict$Sent_ID), gsub("NO-MOVE", "NMV0",mv_VP_POST_dict$Sent_ID))
+mv_VP_POST_dict$Sent_ID <- ifelse(mv_VP_POST_dict$Condition == "MV" & nchar(mv_VP_POST_dict$Sent_ID)==6, gsub("MOVE", "MV",mv_VP_POST_dict$Sent_ID), gsub("MOVE", "MV0",mv_VP_POST_dict$Sent_ID))
+mv_VP_POST_dict$Item <- mv_VP_POST_dict$Sent_ID
+```
+
+
+#h3 Accuracy
+```{r, echo=FALSE}
+cb_acc_ind <- accuracy_by_cond(final_SPL_CB_Q)
+sc_acc_ind <- accuracy_by_cond(final_SPL_SC_Q)
+
+cb_acc <- accuracy_by_cond(final_SPL_CB_Q, within_subject = FALSE)
+sc_acc <- accuracy_by_cond(final_SPL_SC_Q, within_subject = FALSE)
+
+acc_comparison <- data.frame(rbind(cb_acc, sc_acc))
+acc_comparison$GROUP = c(rep('Blind',5),rep('Sighted',5))
+```
+
+```{r}
+acc_comparison <- subset(acc_comparison, CONDITION != 'FL')
+ggplot(data = acc_comparison, aes(x = CONDITION, y = Accuracy, fill=GROUP,
+                                                    ymin=Accuracy-se, ymax=Accuracy+se))+
+  geom_bar(width = 0.7, position="dodge", stat = "identity", color = "black") + 
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent, breaks = seq(0, 1, by = 0.2), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  geom_errorbar(width = 0, position = position_dodge(0.7))+
+  xlab("Condition") + 
+  labs(fill = "Participant Group:") +
+  geom_text(aes(x=CONDITION, Accuracy,label=(perc)), position=position_dodge(width=1), vjust=-0.5, size=3.8) +
+  ggtitle("Mean Accuracy for sighted and blind participants in each condition")
+
+```
+
+#h4 Accuracy analysis: GP
+```{r}
+gp_cb_df <- subset(final_SPL_CB_Q[c("CONDITION", "Item", "ID", "Correct")], CONDITION %in% c("GP", "NG"))
+gp_sc_df <- subset(final_SPL_SC_Q[c("CONDITION", "Item", "ID","Correct")], CONDITION %in% c("GP", "NG"))
+gp_cb_df$Group = 0
+gp_sc_df$Group = 1
+
+acc_CB_q_gp <- data.frame(rbind(gp_cb_df, gp_sc_df))
+
+filt_GPLG_glm_cb <- glmer(Correct ~ CONDITION * Group + (1|Item) + (1|ID), 
+                          data=acc_CB_q_gp, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+summary(filt_GPLG_glm_cb)
+
+```
+
+#h4 Accuracy analysis: CB group only
+```{r}
+filt_GP_glm_CBonly <- glmer(Correct ~ CONDITION + (1|Item) + (1|ID), 
+                          data=gp_cb_df, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+summary(filt_GP_glm_CBonly)
+
+```
+
+#h4 Accuracy analysis: SC group only
+```{r}
+filt_GP_glm_SConly <- glmer(Correct ~ CONDITION + (1|Item) + (1|ID), 
+                          data=gp_sc_df, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+summary(filt_GP_glm_SConly)
+```
+
+#h4 Accuracy analysis: MV
+```{r}
+mv_cb_df <- subset(final_SPL_CB_Q[c("CONDITION", "Item", "ID", "Correct")], CONDITION %in% c("MV", "NMV"))
+mv_sc_df <- subset(final_SPL_SC_Q[c("CONDITION", "Item", "ID","Correct")], CONDITION %in% c("MV", "NMV"))
+mv_cb_df$Group = 0
+mv_sc_df$Group = 1
+
+acc_CB_q_mv <- data.frame(rbind(mv_cb_df, mv_sc_df))
+
+filt_MV_glm_cb <- glmer(Correct ~ CONDITION *Group + (1|Item) + (1|ID), 
+                          data=acc_CB_q_mv, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+summary(filt_MV_glm_cb)
+```
+
+#h4 Accuracy analysis: CB group only
+```{r}
+filt_MV_glm_CBonly <- glmer(Correct ~ CONDITION + (1|Item) + (1|ID), 
+                          data=mv_cb_df, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+summary(filt_MV_glm_CBonly)
+
+```
+
+#h4 Accuracy analysis: SC group only
+```{r}
+filt_MV_glm_SConly <- glmer(Correct ~ CONDITION + (1|Item) + (1|ID), 
+                          data=mv_sc_df, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+summary(filt_MV_glm_SConly)
+```
+
+#h3 Question RT
+```{r}
+filt_q_rt_df <- data.frame(
+  CONDITION = c('GP','NG','MV','NMV','GP','NG','MV','NMV'),
+  GROUP = c(rep("Blind",4),rep("Sighted",4)),
+  avg = c(
+    mean(subset(final_SPL_CB_Q, CONDITION == 'GP')$RT),
+    mean(subset(final_SPL_CB_Q, CONDITION == 'NG')$RT),   
+    mean(subset(final_SPL_CB_Q, CONDITION == 'MV')$RT),    
+    mean(subset(final_SPL_CB_Q, CONDITION == 'NMV')$RT),    
+    mean(subset(final_SPL_SC_Q, CONDITION == 'GP')$RT),
+    mean(subset(final_SPL_SC_Q, CONDITION == 'NG')$RT),   
+    mean(subset(final_SPL_SC_Q, CONDITION == 'MV')$RT),    
+    mean(subset(final_SPL_SC_Q, CONDITION == 'NMV')$RT)
+  ),
+  se = c(
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'GP')$RT),
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'NG')$RT),   
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'MV')$RT),    
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'NMV')$RT),    
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'GP')$RT),
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'NG')$RT),   
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'MV')$RT),    
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'NMV')$RT)
+  ),
+  avg_w_dur = c(
+    mean(subset(final_SPL_CB_Q, CONDITION == 'GP')$"RT+Duration"),
+    mean(subset(final_SPL_CB_Q, CONDITION == 'NG')$"RT+Duration"),   
+    mean(subset(final_SPL_CB_Q, CONDITION == 'MV')$"RT+Duration"),    
+    mean(subset(final_SPL_CB_Q, CONDITION == 'NMV')$"RT+Duration"),    
+    mean(subset(final_SPL_SC_Q, CONDITION == 'GP')$"RT+Duration"),
+    mean(subset(final_SPL_SC_Q, CONDITION == 'NG')$"RT+Duration"),   
+    mean(subset(final_SPL_SC_Q, CONDITION == 'MV')$"RT+Duration"),    
+    mean(subset(final_SPL_SC_Q, CONDITION == 'NMV')$"RT+Duration")
+  ),
+  se_w_dur = c(
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'GP')$"RT+Duration"),
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'NG')$"RT+Duration"),   
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'MV')$"RT+Duration"),    
+    std.error(subset(final_SPL_CB_Q, CONDITION == 'NMV')$"RT+Duration"),    
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'GP')$"RT+Duration"),
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'NG')$"RT+Duration"),   
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'MV')$"RT+Duration"),    
+    std.error(subset(final_SPL_SC_Q, CONDITION == 'NMV')$"RT+Duration")
+  )
+)
+```
+
+
+```{r}
+ggplot(data = filt_q_rt_df, aes(x = factor(CONDITION, levels = c('GP','NG','MV','NMV')), y = avg, fill=GROUP,
+                                                    ymin=avg-se, ymax=avg+se))+
+  geom_bar(width = 0.7, position="dodge", stat = "identity", color = "black") + 
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(0, 1500, by = 250), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  geom_errorbar(width = 0, position = position_dodge(0.7))+
+  xlab("Condition") + 
+  ylab("Average RT(msecs)") +
+  labs(fill = "Participant Group:") +
+  geom_text(aes(x=CONDITION, avg,label=(round(avg,0))), position=position_dodge(width=1), vjust=-0.8, size=3.8) +
+  ggtitle("Mean RT for sighted and blind participants in each condition")
+
+
+cb_temp = subset(final_SPL_CB_Q, CONDITION != 'FL')[,c('ID','CONDITION','Item','RT','RT+Duration')]
+cb_temp$Group = 'Blind'
+sc_temp = subset(final_SPL_SC_Q, CONDITION != 'FL')[,c('ID','CONDITION','Item','RT','RT+Duration')]
+sc_temp$Group = 'Sighted'
+SPL_Q_violin <- data.frame(rbind(cb_temp,sc_temp))
+
+ggplot(data = SPL_Q_violin, aes(x = CONDITION, y = RT,fill=Group))+
+  geom_violin()+
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(-10000, 15000, by = 1000), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  xlab("Condition") + 
+  ylab("Average RT(msecs)") +
+  labs(fill = "Participant Group:") +
+  ggtitle("Question RT for sighted and blind participants in each condition")
+```
+
+```{r}
+ggplot(data = filt_q_rt_df, aes(x = CONDITION, y = avg_w_dur, fill=GROUP,
+                                                    ymin=avg_w_dur-se_w_dur, ymax=avg_w_dur+se_w_dur))+
+  geom_bar(width = 0.7, position="dodge", stat = "identity", color = "black") + 
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(0, 4750, by = 250), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  geom_errorbar(width = 0, position = position_dodge(0.7))+
+  xlab("Condition") + 
+  ylab("Average RT with Duration (msecs)") +
+  labs(fill = "Participant Group:") +
+  geom_text(aes(CONDITION, avg_w_dur,label=(round(avg_w_dur,0))), position=position_dodge(width=1), vjust=-0.8, size=3.8) +
+  ggtitle("Mean RT with Duration for sighted and blind participants in each condition")
+```
+
+#h3 RT analysis
+
+Applying 2000ms constant and natural log transformation
+```{r}
+q_gp_cb_df <- subset(final_SPL_CB_Q[c("CONDITION", "Item", "ID","Correct", "RT", "RT+Duration")], CONDITION %in% c("GP", "NG"))
+q_gp_sc_df <- subset(final_SPL_SC_Q[c("CONDITION", "Item", "ID","Correct","RT", "RT+Duration")], CONDITION %in% c("GP", "NG"))
+q_gp_cb_df$Group = 0
+q_gp_sc_df$Group = 1
+
+rt_q_gp <- data.frame(rbind(q_gp_cb_df, q_gp_sc_df))
+
+rt_q_gp$ln_RT <- log(rt_q_gp$RT+2000)
+rt_q_gp$ln_RT_Duration <- log(rt_q_gp$RT.Duration)
+
+```
+
+
+```{r}
+#log transformed RT
+log_q_gp_lm <- lmer(ln_RT ~ CONDITION * Group + (1|Item) + (1|ID), data = rt_q_gp, REML = FALSE)
+summary(log_q_gp_lm)
+
+#RT+duration
+q_dur_gp_lm<- lmer(RT.Duration ~ CONDITION * Group + (1|Item) + (1|ID), data = rt_q_gp,REML = FALSE,control = lmerControl())
+summary(q_dur_gp_lm)
+```
+MV transformation
+```{r}
+q_mv_cb_df <- subset(final_SPL_CB_Q[c("CONDITION", "Item", "ID","Correct", "RT", "RT+Duration")], CONDITION %in% c("MV", "NMV"))
+q_mv_sc_df <- subset(final_SPL_SC_Q[c("CONDITION", "Item", "ID","Correct","RT", "RT+Duration")], CONDITION %in% c("MV", "NMV"))
+q_mv_cb_df$Group = 0
+q_mv_sc_df$Group = 1
+
+rt_q_mv <- data.frame(rbind(q_mv_cb_df, q_mv_sc_df))
+
+rt_q_mv$ln_RT <- log(rt_q_mv$RT+2000)
+rt_q_mv$ln_RT_Duration <- log(rt_q_mv$RT.Duration)
+
+```
+
+
+```{r}
+#log transformed RT
+log_q_mv_lm <- lmer(ln_RT ~ CONDITION * Group + (1|Item) + (1|ID), data = rt_q_mv, REML = FALSE,control = lmerControl())
+summary(log_q_mv_lm)
+
+#RT+duration
+q_dur_mv_lm<- lmer(RT.Duration ~ CONDITION * Group + (1|Item) + (1|ID), data = rt_q_mv, REML = FALSE,control = lmerControl())
+summary(log_q_mv_lm)
+```
+
+#h3 Segment by Segment RT
+```{r}
+gp_CB_S <- subset(final_SPL_CB_S, CONDITION == 'GP')
+ng_CB_S <- subset(final_SPL_CB_S, CONDITION == 'NG')
+
+
+df_gp_CB_SegRT <- data.frame(
+  s_label <- c(1:8),
+  s_words <- c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."),
+  gp_avg <- c(
+    mean(subset(gp_CB_S, Seg == 'seg01')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg02')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg03')$RT),
+    NA,
+    mean(subset(gp_CB_S, Seg == 'seg04')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg05')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg06')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg07')$RT)
+  ),
+  gp_se <- c(
+    std.error(subset(gp_CB_S, Seg == 'seg01')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg02')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg03')$RT),
+    NA,
+    std.error(subset(gp_CB_S, Seg == 'seg04')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg05')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg06')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg07')$RT)
+  ),
+  ng_avg <- c(
+    mean(subset(ng_CB_S, Seg == 'seg01')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg02')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg03')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg04')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg05')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg06')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg07')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg08')$RT)
+  ),
+  ng_se <- c(
+    std.error(subset(ng_CB_S, Seg == 'seg01')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg02')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg03')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg04')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg05')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg06')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg07')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg08')$RT)
+  )
+)
+colnames(df_gp_CB_SegRT)<-(c("s_label", "s_words","gp_avg","gp_se","ng_avg","ng_se"))
+
+
+gp_SC_S <- subset(final_SPL_SC_S, CONDITION == 'GP')
+ng_SC_S <- subset(final_SPL_SC_S, CONDITION == 'NG')
+
+
+df_gp_SC_SegRT <- data.frame(
+  s_label <- c(1:8),
+  s_words <- c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."),
+  gp_avg <- c(
+    mean(subset(gp_SC_S, Seg == 'seg01')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg02')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg03')$RT),
+    NA,
+    mean(subset(gp_SC_S, Seg == 'seg04')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg05')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg06')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg07')$RT)
+  ),
+  gp_se <- c(
+    std.error(subset(gp_SC_S, Seg == 'seg01')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg02')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg03')$RT),
+    NA,
+    std.error(subset(gp_SC_S, Seg == 'seg04')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg05')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg06')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg07')$RT)
+  ),
+  ng_avg <- c(
+    mean(subset(ng_SC_S, Seg == 'seg01')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg02')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg03')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg04')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg05')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg06')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg07')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg08')$RT)
+  ),
+  ng_se <- c(
+    std.error(subset(ng_SC_S, Seg == 'seg01')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg02')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg03')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg04')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg05')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg06')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg07')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg08')$RT)
+  )
+)
+colnames(df_gp_SC_SegRT)<-(c("s_label", "s_words","gp_avg","gp_se","ng_avg","ng_se"))
+
+df_gp_SegRT <- data.frame(rbind(df_gp_CB_SegRT,df_gp_SC_SegRT))
+df_gp_SegRT$Group <- c(rep("Blind",8),rep("Sighted",8))
+```
+
+```{r}
+df_gp_CB_SegRT$s_words <- factor(df_gp_CB_SegRT$s_words, levels = c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."))
+ggplot(data = df_gp_CB_SegRT, aes(x = s_words))+
+  geom_line(aes(y = gp_avg, group = 1), color = "red",size = 1) + 
+  geom_point(aes(y = gp_avg, group = 1),shape = 23, linewidth = 3, fill = "red", color = "black")+
+  geom_errorbar(aes(y = gp_avg, group = 1, ymin=gp_avg-gp_se, ymax=gp_avg+gp_se),width = .2, position = position_dodge(0.7))+
+  geom_line(aes(y = ng_avg, group = 1), size = 1) + 
+  geom_point(aes(y = ng_avg, group = 1),shape = 25, linewidth = 3,fill = "white", color = "black")+
+  geom_errorbar(aes(y = ng_avg, group = 1, ymin=ng_avg-ng_se, ymax=ng_avg+ng_se),width = .2, position = position_dodge(0.7))+
+  
+  geom_line(data = df_gp_SC_SegRT, aes(y = gp_avg, group = 1), color = "red",linewidth = 0.7, linetype = "dashed") + 
+  geom_point(data = df_gp_SC_SegRT,aes(y = gp_avg, group = 1),shape = 23, size = 2, fill = "red", color = "black")+
+  geom_errorbar(data = df_gp_SC_SegRT,aes(y = gp_avg, group = 1, ymin=gp_avg-gp_se, ymax=gp_avg+gp_se),width = .1, position = position_dodge(0.7))+
+  geom_line(data = df_gp_SC_SegRT,aes(y = ng_avg, group = 1), linewidth = 0.7, linetype = "dashed") + 
+  geom_point(data = df_gp_SC_SegRT,aes(y = ng_avg, group = 1),shape = 25, size = 2,fill = "white", color = "black")+
+  geom_errorbar(data = df_gp_SC_SegRT,aes(y = ng_avg, group = 1, ymin=ng_avg-ng_se, ymax=ng_avg+ng_se),width = .1, position = position_dodge(0.7))+
+  
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(0, 700, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  xlab("Segment Labels") +
+  ylab("Response Time (msecs)")+
+  labs(color = "Legend", shape = "Group")
+```
+
+Creating segment average dataframe with different format for RT plotting
+```{r}
+library(plotrix)
+gp_CB_S <- subset(final_SPL_CB_S, CONDITION == 'GP')
+ng_CB_S <- subset(final_SPL_CB_S, CONDITION == 'NG')
+
+
+df_gp_CB_SegRT <- data.frame(
+  s_label <- c(1:8),
+  s_words <- c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."),
+  CONDITION <- c(rep("GP",8),rep("NG",8)),
+  avg <- c(
+    mean(subset(gp_CB_S, Seg == 'seg01')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg02')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg03')$RT),
+    NA,
+    mean(subset(gp_CB_S, Seg == 'seg04')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg05')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg06')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg07')$RT),
+    
+    mean(subset(ng_CB_S, Seg == 'seg01')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg02')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg03')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg04')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg05')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg06')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg07')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg08')$RT)
+  ),
+  se <- c(
+    std.error(subset(gp_CB_S, Seg == 'seg01')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg02')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg03')$RT),
+    NA,
+    std.error(subset(gp_CB_S, Seg == 'seg04')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg05')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg06')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg07')$RT),    
+    
+    std.error(subset(ng_CB_S, Seg == 'seg01')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg02')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg03')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg04')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg05')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg06')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg07')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg08')$RT)
+  )
+)
+colnames(df_gp_CB_SegRT)<-(c("s_label", "s_words","CONDITION","avg","se"))
+
+
+gp_SC_S <- subset(final_SPL_SC_S, CONDITION == 'GP')
+ng_SC_S <- subset(final_SPL_SC_S, CONDITION == 'NG')
+
+df_gp_SC_SegRT <- data.frame(
+  s_label <- c(1:8),
+  s_words <- c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."),
+  CONDITION <- c(rep("GP",8),rep("NG",8)),
+  avg <- c(
+    mean(subset(gp_SC_S, Seg == 'seg01')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg02')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg03')$RT),
+    NA,
+    mean(subset(gp_SC_S, Seg == 'seg04')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg05')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg06')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg07')$RT),
+    
+    mean(subset(ng_SC_S, Seg == 'seg01')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg02')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg03')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg04')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg05')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg06')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg07')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg08')$RT)
+  ),
+  se <- c(
+    std.error(subset(gp_SC_S, Seg == 'seg01')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg02')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg03')$RT),
+    NA,
+    std.error(subset(gp_SC_S, Seg == 'seg04')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg05')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg06')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg07')$RT),    
+    
+    std.error(subset(ng_SC_S, Seg == 'seg01')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg02')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg03')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg04')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg05')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg06')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg07')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg08')$RT)
+  )
+)
+colnames(df_gp_SC_SegRT)<-(c("s_label", "s_words","CONDITION","avg","se"))
+
+df_gp_SegRT <- data.frame(rbind(df_gp_CB_SegRT,df_gp_SC_SegRT))
+df_gp_SegRT$Group <- c(rep("Blind",16),rep("Sighted",16))
+
+
+df_gp_CB_SegRT$s_words <- factor(df_gp_CB_SegRT$s_words, levels = c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."))
+df_gp_SC_SegRT$s_words <- factor(df_gp_SC_SegRT$s_words, levels = c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."))
+df_gp_SegRT$s_words <- factor(df_gp_SegRT$s_words, levels = c("While", "the man","hunted","the pheasant","the brown","and graceful deer", "ran", "into the woods."))
+
+```
+
+
+Plotting GP vs NG Segment RT
+```{r}
+ggplot(data = df_gp_CB_SegRT, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 800, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)") +
+  ggtitle("Segment RT in blind participants")
+
+ggplot(data = df_gp_SC_SegRT, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 800, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)") + 
+  ggtitle("Segment RT in sighted participants")
+```
+
+Average non-critical segments
+```{r}
+df_gp_SPL_CB_avg <- data.frame(
+  s_label <- c(1:3),
+  s_words <- c("average of segments 1-6", "ran", "into the woods."),
+  CONDITION <- c(rep("GP",3),rep("NG",3)),
+  avg <- c(
+    mean(df_gp_CB_SegRT[c(1,2,3,5,6),]$avg),
+    mean(subset(gp_CB_S, Seg == 'seg06')$RT),
+    mean(subset(gp_CB_S, Seg == 'seg07')$RT),
+    
+    mean(df_gp_CB_SegRT[c(9,10,11,12,13,14),]$avg),
+    mean(subset(ng_CB_S, Seg == 'seg07')$RT),
+    mean(subset(ng_CB_S, Seg == 'seg08')$RT)
+  ),
+  se <- c(
+    std.error(subset(gp_CB_S, !(Seg %in% c("seg06",'seg07')))$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg06')$RT),
+    std.error(subset(gp_CB_S, Seg == 'seg07')$RT),    
+    
+    std.error(subset(ng_CB_S, !(Seg %in% c("seg07",'seg08')))$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg07')$RT),
+    std.error(subset(ng_CB_S, Seg == 'seg08')$RT)
+  )
+)
+colnames(df_gp_SPL_CB_avg)<-(c("s_label", "s_words","CONDITION","avg","se"))
+
+
+df_gp_SPL_SC_avg <- data.frame(
+  s_label <- c(1:3),
+  s_words <- c("average of segments 1-6", "ran", "into the woods."),
+  CONDITION <- c(rep("GP",3),rep("NG",3)),
+  avg <- c(
+    mean(df_gp_SC_SegRT[c(1,2,3,5,6),]$avg),
+    mean(subset(gp_SC_S, Seg == 'seg06')$RT),
+    mean(subset(gp_SC_S, Seg == 'seg07')$RT),
+    
+    mean(df_gp_SC_SegRT[c(9,10,11,12,13,14),]$avg),
+    mean(subset(ng_SC_S, Seg == 'seg07')$RT),
+    mean(subset(ng_SC_S, Seg == 'seg08')$RT)
+  ),
+  se <- c(
+    std.error(subset(gp_SC_S, !(Seg %in% c("seg06",'seg07')))$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg06')$RT),
+    std.error(subset(gp_SC_S, Seg == 'seg07')$RT),    
+    
+    std.error(subset(ng_SC_S, !(Seg %in% c("seg07",'seg08')))$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg07')$RT),
+    std.error(subset(ng_SC_S, Seg == 'seg08')$RT)
+  )
+)
+colnames(df_gp_SPL_SC_avg)<-(c("s_label", "s_words","CONDITION","avg","se"))
+
+df_gp_SegRT_avg <- data.frame(rbind(df_gp_SPL_CB_avg,df_gp_SPL_SC_avg))
+df_gp_SegRT_avg$Group <- c(rep("Blind",6),rep("Sighted",6))
+
+
+df_gp_SPL_CB_avg$s_words <- factor(df_gp_SPL_CB_avg$s_words, levels = c("average of segments 1-6", "ran", "into the woods."))
+df_gp_SPL_SC_avg$s_words <- factor(df_gp_SPL_SC_avg$s_words, levels = c("average of segments 1-6", "ran", "into the woods."))
+df_gp_SPL_SC_avg$s_words <- factor(df_gp_SPL_SC_avg$s_words, levels = c("average of segments 1-6", "ran", "into the woods."))
+
+
+#creating dfs for violin plot
+cb_gp_s_temp = subset(final_SPL_CB_S, (CONDITION == 'GP' & !Seg %in% c('seg06','seg07')) | (CONDITION == 'NG' & !Seg %in% c('seg07','seg08')))[,c('ID','CONDITION','Item','RT','RT+Duration')]
+cb_gp_s_temp$Group = 'Blind'
+cb_gp_s_temp$Seg = 'Avg'
+
+sc_gp_s_temp = subset(final_SPL_CB_S, (CONDITION == 'GP' & !Seg %in% c('seg06','seg07')) | (CONDITION == 'NG' & !Seg %in% c('seg07','seg08')))[,c('ID','CONDITION','Item','RT','RT+Duration')]
+sc_gp_s_temp$Group = 'Sighted'
+sc_gp_s_temp$Seg = 'Avg'
+
+cb_gp_s_temp1 = subset(final_SPL_CB_S, (CONDITION == 'GP' & Seg %in% c('seg06','seg07')) | (CONDITION == 'NG' & Seg %in% c('seg07','seg08')))[,c('ID','CONDITION','Item','RT','RT+Duration')]
+cb_gp_s_temp1$Group = 'Blind'
+cb_gp_s_temp1$Seg = 'Avg_crit'
+sc_gp_s_temp1 = subset(final_SPL_SC_S, (CONDITION == 'GP' & Seg %in% c('seg06','seg07')) | (CONDITION == 'NG' & Seg %in% c('seg07','seg08')))[,c('ID','CONDITION','Item','RT','RT+Duration')]
+sc_gp_s_temp1$Group = 'Sighted'
+sc_gp_s_temp1$Seg = 'Avg_crit'
+
+SPL_GP_noncrit_violin <- data.frame(rbind(cb_gp_s_temp,sc_gp_s_temp))
+
+SPL_GP_crit_violin <- data.frame(rbind(cb_gp_s_temp1,sc_gp_s_temp1))
+```
+
+
+```{r}
+ggplot(data = df_gp_SPL_CB_avg, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 800, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)") +
+  ggtitle("Segment RT in blind participants")
+
+ggplot(data = df_gp_SPL_SC_avg, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 800, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)") + 
+  ggtitle("Segment RT in sighted participants")
+```
+```{r}
+ggplot(data = SPL_GP_noncrit_violin, aes(x = CONDITION, y = RT, fill=Group))+
+  geom_violin()+
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(-10000, 15000, by = 1000), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  xlab("Condition") + 
+  ylab("Average RT(msecs)") +
+  labs(fill = "Participant Group:") +
+  ggtitle("Non-critical RT for sighted and blind participants in each condition")
+
+ggplot(data = SPL_GP_crit_violin, aes(x = CONDITION, y = RT, fill=Group))+
+  geom_violin()+
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(-10000, 15000, by = 1000), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  xlab("Condition") + 
+  ylab("Average RT(msecs)") +
+  labs(fill = "Participant Group:") +
+  ggtitle("Critical RT for sighted and blind participants in each condition")
+
+```
+
+adding flags to MV, NMV segments
+```{r}
+####  CB  #####
+mv_CB_S <- subset(final_SPL_CB_S, CONDITION == 'MV')
+nmv_CB_S <- subset(final_SPL_CB_S, CONDITION == 'NMV')
+
+mv_CB_S <- merge(mv_CB_S, subset(mv_VP_POST_dict, Condition == 'MV'),by = "Item")
+nmv_CB_S <- merge(nmv_CB_S, subset(mv_VP_POST_dict, Condition == 'NMV'), by = "Item")
+
+#note: grepl or %in% are column-wise operators, cant use for VP1 comparisons
+mv_CB_S$Crit <- ifelse(mv_CB_S$Seg == mv_CB_S$VP2, "Verb2", ifelse(mv_CB_S$Seg == mv_CB_S$Post, "Post", ifelse(mv_CB_S$Seg == mv_CB_S$VP1, "Verb1", ifelse(mv_CB_S$Seg == mv_CB_S$Adv, "Adv", "NA"))))
+
+mv_CB_S[mv_CB_S$Item == "MV19" & (mv_CB_S$Seg == 'seg04'),]$Crit = "Verb1"
+mv_CB_S[mv_CB_S$Item == "MV19" & (mv_CB_S$Seg == 'seg05'),]$Crit = "Verb1"
+
+
+
+nmv_CB_S$Crit <- ifelse(nmv_CB_S$Seg == nmv_CB_S$VP2, "Verb2", ifelse(nmv_CB_S$Seg == nmv_CB_S$Post, "Post", ifelse(nmv_CB_S$Seg == nmv_CB_S$VP1, "Verb1", ifelse(nmv_CB_S$Seg == nmv_CB_S$Adv, "Adv", "NA"))))
+
+nmv_CB_S[nmv_CB_S$Item == "NMV19" & (nmv_CB_S$Seg == 'seg03'),]$Crit = "Verb1"
+nmv_CB_S[nmv_CB_S$Item == "NMV19" & (nmv_CB_S$Seg == 'seg04'),]$Crit = "Verb1"
+
+
+####  SC  #####
+mv_SC_S <- subset(final_SPL_SC_S, CONDITION == 'MV')
+nmv_SC_S <- subset(final_SPL_SC_S, CONDITION == 'NMV')
+
+mv_SC_S <- merge(mv_SC_S, subset(mv_VP_POST_dict, Condition == 'MV'),by = "Item")
+nmv_SC_S <- merge(nmv_SC_S, subset(mv_VP_POST_dict, Condition == 'NMV'), by = "Item")
+
+#note: grepl or %in% are column-wise operators, cant use for VP1 comparisons
+mv_SC_S$Crit <- ifelse(mv_SC_S$Seg == mv_SC_S$VP2, "Verb2", ifelse(mv_SC_S$Seg == mv_SC_S$Post, "Post", ifelse(mv_SC_S$Seg == mv_SC_S$VP1, "Verb1", ifelse(mv_SC_S$Seg == mv_SC_S$Adv, "Adv", "NA"))))
+
+mv_SC_S[mv_SC_S$Item == "MV19" & (mv_SC_S$Seg == 'seg04'),]$Crit = "Verb1"
+mv_SC_S[mv_SC_S$Item == "MV19" & (mv_SC_S$Seg == 'seg05'),]$Crit = "Verb1"
+
+
+
+nmv_SC_S$Crit <- ifelse(nmv_SC_S$Seg == nmv_SC_S$VP2, "Verb2", ifelse(nmv_SC_S$Seg == nmv_SC_S$Post, "Post", ifelse(nmv_SC_S$Seg == nmv_SC_S$VP1, "Verb1", ifelse(nmv_SC_S$Seg == nmv_SC_S$Adv, "Adv", "NA"))))
+
+nmv_SC_S[nmv_SC_S$Item == "NMV19" & (nmv_SC_S$Seg == 'seg03'),]$Crit = "Verb1"
+nmv_SC_S[nmv_SC_S$Item == "NMV19" & (nmv_SC_S$Seg == 'seg04'),]$Crit = "Verb1"
+```
+
+Plotting MV vs NMV Segment RT
+without adverb
+```{r}
+
+#Without adverb
+df_mv_SPL_CB_SegRT <- data.frame(
+  s_words <- factor(c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation")),
+  CONDITION <- c(rep("MV",4),rep("NMV",4)),
+  avg <- c(
+    mean(subset(mv_CB_S, Crit == 'NA')$RT),
+    mean(subset(mv_CB_S, Crit == 'Verb1')$RT),
+    #mean(subset(mv_CB_S, Crit == 'Adv')$RT),
+    mean(subset(mv_CB_S, Crit == 'Verb2')$RT),
+    mean(subset(mv_CB_S, Crit == 'Post')$RT),
+
+    mean(subset(nmv_CB_S, Crit == 'NA')$RT),
+    mean(subset(nmv_CB_S, Crit == 'Verb1')$RT),
+    #mean(subset(nmv_CB_S, Crit == 'Adv')$RT),
+    mean(subset(nmv_CB_S, Crit == 'Verb2')$RT),
+    mean(subset(nmv_CB_S, Crit == 'Post')$RT)
+  ),
+  se <- c(
+    std.error(subset(mv_CB_S, Crit == 'NA')$RT),
+    std.error(subset(mv_CB_S, Crit == 'Verb1')$RT),
+    #std.error(subset(mv_CB_S, Crit == 'Adv')$RT),
+    std.error(subset(mv_CB_S, Crit == 'Verb2')$RT),
+    std.error(subset(mv_CB_S, Crit == 'Post')$RT),
+
+    std.error(subset(nmv_CB_S, Crit == 'NA')$RT),
+    std.error(subset(nmv_CB_S, Crit == 'Verb1')$RT),
+    #std.error(subset(nmv_CB_S, Crit == 'Adv')$RT),
+    std.error(subset(nmv_CB_S, Crit == 'Verb2')$RT),
+    std.error(subset(nmv_CB_S, Crit == 'Post')$RT)
+  )
+)
+colnames(df_mv_SPL_CB_SegRT)<-(c("s_words","CONDITION","avg","se"))
+
+#SC
+#Without adverb
+df_mv_SPL_SC_SegRT <- data.frame(
+  s_words <- factor(c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation")),
+  CONDITION <- c(rep("MV",4),rep("NMV",4)),
+  avg <- c(
+    mean(subset(mv_SC_S, Crit == 'NA')$RT),
+    mean(subset(mv_SC_S, Crit == 'Verb1')$RT),
+    #mean(subset(mv_SC_S, Crit == 'Adv')$RT),
+    mean(subset(mv_SC_S, Crit == 'Verb2')$RT),
+    mean(subset(mv_SC_S, Crit == 'Post')$RT),
+
+    mean(subset(nmv_SC_S, Crit == 'NA')$RT),
+    mean(subset(nmv_SC_S, Crit == 'Verb1')$RT),
+    #mean(subset(nmv_SC_S, Crit == 'Adv')$RT),
+    mean(subset(nmv_SC_S, Crit == 'Verb2')$RT),
+    mean(subset(nmv_SC_S, Crit == 'Post')$RT)
+  ),
+  se <- c(
+    std.error(subset(mv_SC_S, Crit == 'NA')$RT),
+    std.error(subset(mv_SC_S, Crit == 'Verb1')$RT),
+    #std.error(subset(mv_SC_S, Crit == 'Adv')$RT),
+    std.error(subset(mv_SC_S, Crit == 'Verb2')$RT),
+    std.error(subset(mv_SC_S, Crit == 'Post')$RT),
+
+    std.error(subset(nmv_SC_S, Crit == 'NA')$RT),
+    std.error(subset(nmv_SC_S, Crit == 'Verb1')$RT),
+    #std.error(subset(nmv_SC_S, Crit == 'Adv')$RT),
+    std.error(subset(nmv_SC_S, Crit == 'Verb2')$RT),
+    std.error(subset(nmv_SC_S, Crit == 'Post')$RT)
+  )
+)
+colnames(df_mv_SPL_SC_SegRT)<-(c("s_words","CONDITION","avg","se"))
+
+df_mv_SPL_SegRT <- data.frame(rbind(df_mv_SPL_CB_SegRT,df_mv_SPL_SC_SegRT))
+df_mv_SPL_SegRT$Group <- c(rep("Blind",8),rep("Sighted",8))
+
+df_mv_SPL_CB_SegRT$s_words <- factor(df_mv_SPL_CB_SegRT$s_words, levels = c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation"))
+df_mv_SPL_SC_SegRT$s_words <- factor(df_mv_SPL_SC_SegRT$s_words, levels = c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation"))
+df_mv_SPL_SegRT$s_words <- factor(df_mv_SPL_SegRT$s_words, levels = c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation"))
+```
+
+
+with adverb
+```{r}
+
+#Without adverb
+df_mv_SPL_CB_SegRT <- data.frame(
+  s_words <- factor(c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation")),
+  CONDITION <- c(rep("MV",5),rep("NMV",5)),
+  avg <- c(
+    mean(subset(mv_CB_S, Crit == 'NA')$RT),
+    mean(subset(mv_CB_S, Crit == 'Verb1')$RT),
+    mean(subset(mv_CB_S, Crit == 'Adv')$RT),
+    mean(subset(mv_CB_S, Crit == 'Verb2')$RT),
+    mean(subset(mv_CB_S, Crit == 'Post')$RT),
+
+    mean(subset(nmv_CB_S, Crit == 'NA')$RT),
+    mean(subset(nmv_CB_S, Crit == 'Verb1')$RT),
+    mean(subset(nmv_CB_S, Crit == 'Adv')$RT),
+    mean(subset(nmv_CB_S, Crit == 'Verb2')$RT),
+    mean(subset(nmv_CB_S, Crit == 'Post')$RT)
+  ),
+  se <- c(
+    std.error(subset(mv_CB_S, Crit == 'NA')$RT),
+    std.error(subset(mv_CB_S, Crit == 'Verb1')$RT),
+    std.error(subset(mv_CB_S, Crit == 'Adv')$RT),
+    std.error(subset(mv_CB_S, Crit == 'Verb2')$RT),
+    std.error(subset(mv_CB_S, Crit == 'Post')$RT),
+
+    std.error(subset(nmv_CB_S, Crit == 'NA')$RT),
+    std.error(subset(nmv_CB_S, Crit == 'Verb1')$RT),
+    std.error(subset(nmv_CB_S, Crit == 'Adv')$RT),
+    std.error(subset(nmv_CB_S, Crit == 'Verb2')$RT),
+    std.error(subset(nmv_CB_S, Crit == 'Post')$RT)
+  )
+)
+colnames(df_mv_SPL_CB_SegRT)<-(c("s_words","CONDITION","avg","se"))
+
+#SC
+#Without adverb
+df_mv_SPL_SC_SegRT <- data.frame(
+  s_words <- factor(c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation")),
+  CONDITION <- c(rep("MV",5),rep("NMV",5)),
+  avg <- c(
+    mean(subset(mv_SC_S, Crit == 'NA')$RT),
+    mean(subset(mv_SC_S, Crit == 'Verb1')$RT),
+    mean(subset(mv_SC_S, Crit == 'Adv')$RT),
+    mean(subset(mv_SC_S, Crit == 'Verb2')$RT),
+    mean(subset(mv_SC_S, Crit == 'Post')$RT),
+
+    mean(subset(nmv_SC_S, Crit == 'NA')$RT),
+    mean(subset(nmv_SC_S, Crit == 'Verb1')$RT),
+    mean(subset(nmv_SC_S, Crit == 'Adv')$RT),
+    mean(subset(nmv_SC_S, Crit == 'Verb2')$RT),
+    mean(subset(nmv_SC_S, Crit == 'Post')$RT)
+  ),
+  se <- c(
+    std.error(subset(mv_SC_S, Crit == 'NA')$RT),
+    std.error(subset(mv_SC_S, Crit == 'Verb1')$RT),
+    std.error(subset(mv_SC_S, Crit == 'Adv')$RT),
+    std.error(subset(mv_SC_S, Crit == 'Verb2')$RT),
+    std.error(subset(mv_SC_S, Crit == 'Post')$RT),
+
+    std.error(subset(nmv_SC_S, Crit == 'NA')$RT),
+    std.error(subset(nmv_SC_S, Crit == 'Verb1')$RT),
+    std.error(subset(nmv_SC_S, Crit == 'Adv')$RT),
+    std.error(subset(nmv_SC_S, Crit == 'Verb2')$RT),
+    std.error(subset(nmv_SC_S, Crit == 'Post')$RT)
+  )
+)
+colnames(df_mv_SPL_SC_SegRT)<-(c("s_words","CONDITION","avg","se"))
+
+df_mv_SPL_SegRT <- data.frame(rbind(df_mv_SPL_CB_SegRT,df_mv_SPL_SC_SegRT))
+df_mv_SPL_SegRT$Group <- c(rep("Blind",10),rep("Sighted",10))
+
+df_mv_SPL_CB_SegRT$s_words <- factor(df_mv_SPL_CB_SegRT$s_words, levels = c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation"))
+df_mv_SPL_SC_SegRT$s_words <- factor(df_mv_SPL_SC_SegRT$s_words, levels = c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation"))
+df_mv_SPL_SegRT$s_words <- factor(df_mv_SPL_SegRT$s_words, levels = c("The architect that the tough fireman at the end of the bar", "dislikes", "has to be", "the center of the conversation"))
+```
+
+```{r}
+df_mv_CB_SegRT <- data.frame(
+  s_words <- factor(c("The architect that the tough fireman at the end of the bar","dislikes","has to be", "the center of the conversation")),
+  mv_avg <- subset(df_mv_SPL_CB_SegRT, CONDITION == 'MV')$avg,
+  mv_se <- subset(df_mv_SPL_CB_SegRT, CONDITION == 'MV')$se,
+  nmv_avg <- subset(df_mv_SPL_CB_SegRT, CONDITION == 'NMV')$avg,
+  nmv_se <- subset(df_mv_SPL_CB_SegRT, CONDITION == 'NMV')$se
+)
+colnames(df_mv_CB_SegRT)<-(c("s_words","mv_avg","mv_se","nmv_avg","nmv_se"))
+
+df_mv_SC_SegRT <- data.frame(
+  s_words <- factor(c("The architect that the tough fireman at the end of the bar","dislikes","has to be", "the center of the conversation")),
+  mv_avg <- subset(df_mv_SPL_SC_SegRT, CONDITION == 'MV')$avg,
+  mv_se <- subset(df_mv_SPL_SC_SegRT, CONDITION == 'MV')$se,
+  nmv_avg <- subset(df_mv_SPL_SC_SegRT, CONDITION == 'NMV')$avg,
+  nmv_se <- subset(df_mv_SPL_SC_SegRT, CONDITION == 'NMV')$se
+)
+colnames(df_mv_SC_SegRT)<-(c("s_words","mv_avg","mv_se","nmv_avg","nmv_se"))
+
+df_mv_CB_SegRT$s_words <- factor(df_mv_CB_SegRT$s_words, levels = c("The architect that the tough fireman at the end of the bar","dislikes","has to be", "the center of the conversation"))
+
+ggplot(data = df_mv_CB_SegRT, aes(x = s_words))+
+  geom_line(aes(y = mv_avg, group = 1), color = "red",size = 1) + 
+  geom_point(aes(y = mv_avg, group = 1),shape = 23, linewidth = 3, fill = "red", color = "black")+
+  geom_errorbar(aes(y = mv_avg, group = 1, ymin=mv_avg-mv_se, ymax=mv_avg+mv_se),width = .2, position = position_dodge(0.7))+
+  geom_line(aes(y = nmv_avg, group = 1), size = 1) + 
+  geom_point(aes(y = nmv_avg, group = 1),shape = 25, linewidth = 3,fill = "white", color = "black")+
+  geom_errorbar(aes(y = nmv_avg, group = 1, ymin=nmv_avg-nmv_se, ymax=nmv_avg+nmv_se),width = .2, position = position_dodge(0.7))+
+  
+  geom_line(data = df_mv_SC_SegRT, aes(y = mv_avg, group = 1), color = "red",linewidth = 0.7, linetype = "dashed") + 
+  geom_point(data = df_mv_SC_SegRT,aes(y = mv_avg, group = 1),shape = 23, size = 2, fill = "red", color = "black")+
+  geom_errorbar(data = df_mv_SC_SegRT,aes(y = mv_avg, group = 1, ymin=mv_avg-mv_se, ymax=mv_avg+mv_se),width = .1, position = position_dodge(0.7))+
+  geom_line(data = df_mv_SC_SegRT,aes(y = nmv_avg, group = 1), linewidth = 0.7, linetype = "dashed") + 
+  geom_point(data = df_mv_SC_SegRT,aes(y = nmv_avg, group = 1),shape = 25, size = 2,fill = "white", color = "black")+
+  geom_errorbar(data = df_mv_SC_SegRT,aes(y = nmv_avg, group = 1, ymin=nmv_avg-nmv_se, ymax=nmv_avg+nmv_se),width = .1, position = position_dodge(0.7))+
+  
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(0, 700, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  xlab("Segment Labels") +
+  ylab("Response Time (msecs)")+
+  labs(color = "Legend", shape = "Group")
+
+
+```
+
+
+```{r}
+ggplot(data = df_mv_SPL_CB_SegRT, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 500, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)")+
+  ggtitle("Segment RT in blind participants")
+
+ggplot(data = df_mv_SPL_SC_SegRT, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 700, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)")+
+  ggtitle("Segment RT in sighted participants")
+```
+```{r}
+ggplot(data = SPL_MV_noncrit_violin, aes(x = CONDITION, y = RT, fill=Group))+
+  geom_violin()+
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(-10000, 15000, by = 1000), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  xlab("Condition") + 
+  ylab("Average RT(msecs)") +
+  labs(fill = "Participant Group:") +
+  ggtitle("Non-critical RT for sighted and blind participants in each condition")
+
+ggplot(data = SPL_MV_crit_violin, aes(x = CONDITION, y = RT, fill=Group))+
+  geom_violin()+
+  scale_fill_grey(start = 0.4, end = 1)+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(-10000, 15000, by = 1000), expand = expansion(mult = c(0, 0.05))) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  xlab("Condition") + 
+  ylab("Average RT(msecs)") +
+  labs(fill = "Participant Group:") +
+  ggtitle("Critical RT for sighted and blind participants in each condition")
+
+```
+
+
+```{r}
+#check segment average per condition across all segments
+gp_CB_avg_all_seg <- mean(subset(final_SPL_CB_S, CONDITION == 'GP')$RT)
+gp_SC_avg_all_seg <- mean(subset(final_SPL_SC_S, CONDITION == 'GP')$RT)
+print("GP Blind group average: ") 
+print(gp_CB_avg_all_seg)
+print("GP Sighted group average: ")
+print(gp_SC_avg_all_seg)
+
+
+ng_CB_avg_all_seg <- mean(subset(final_SPL_CB_S, CONDITION == 'NG')$RT)
+ng_SC_avg_all_seg <- mean(subset(final_SPL_SC_S, CONDITION == 'NG')$RT)
+print("NG Blind group average: ") 
+print(ng_CB_avg_all_seg)
+print("NG Sighted group average: ")
+print(ng_SC_avg_all_seg)
+```
+
+
+```{r}
+ggplot(data = df_mv_SPL_CB_avg, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 800, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)") +
+  ggtitle("Segment RT in blind participants")
+
+ggplot(data = df_mv_SPL_SC_avg, aes(x = avg, y = fct_rev(s_words), fill = CONDITION, xmin=avg-se, xmax=avg+se))+ 
+  geom_bar(width = 0.7, position="dodge",stat = "identity", color = "black") + 
+  geom_errorbar(width = 0, position = position_dodge(0.7)) + 
+  scale_fill_grey(start = 0.4, end = 1) + 
+  scale_x_continuous(breaks = seq(0, 800, by = 100), expand = expansion(mult = c(0, 0.05))) +
+  theme_bw()+
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text=element_text(size = 10)) +
+  ylab("Segment Labels") +
+  xlab("Response Time (msecs)") + 
+  ggtitle("Segment RT in sighted participants")
+
+```
+
+
+#h3 Welch's 2-sample t-test in RT analysis
+GP vs NGP: question RT
+```{r}
+gp_CB_Q <- subset(final_SPL_CB_Q, CONDITION == 'GP')
+ng_CB_Q <- subset(final_SPL_CB_Q, CONDITION == 'NG')
+
+gp_SC_Q <- subset(final_SPL_SC_Q, CONDITION == 'GP')
+ng_SC_Q <- subset(final_SPL_SC_Q, CONDITION == 'NG')
+
+print("t-test GP condition CB vs Blind")
+t.test(gp_CB_Q$RT, gp_SC_Q$RT)
+
+#Across Condition
+print("t-test CB Group GP vs NGP")
+t.test(gp_CB_Q$RT, ng_CB_Q$RT)
+
+print("t-test NG condition CB vs Blind")
+t.test(ng_CB_Q$RT, ng_SC_Q$RT)
+
+print("t-test SC Group GP vs NGP")
+t.test(gp_SC_Q$RT, ng_SC_Q$RT)
+```
+
+GP vs NGP: critical segment RT
+```{r}
+#critical segment within CONDITION across GROUP
+gp_crit_CB_S <- subset(gp_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration")], Seg == 'seg06')
+gp_crit_SC_S <- subset(gp_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration")], Seg == 'seg06')
+print("t-test GP condition CB vs SC")
+t.test(gp_crit_CB_S$RT, gp_crit_SC_S$RT)
+
+#Across Condition
+ng_crit_CB_S <- subset(ng_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration")], Seg == 'seg07')
+print("t-test CB Group GP vs NGP")
+t.test(gp_crit_CB_S$RT, ng_crit_CB_S$RT)
+
+ng_crit_SC_S <- subset(ng_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration")], Seg == 'seg07')
+
+print("t-test NG condition CB vs SC")
+t.test(ng_crit_CB_S$RT, ng_crit_SC_S$RT)
+
+print("t-test SC Group GP vs NGP")
+t.test(gp_crit_SC_S$RT, ng_crit_SC_S$RT)
+
+print("CB GP SD")
+sd(gp_crit_CB_S$RT)
+print("CB NG SD")
+sd(ng_crit_CB_S$RT)
+print("SC GP SD")
+sd(gp_crit_SC_S$RT)
+print("SC NG SD")
+sd(ng_crit_SC_S$RT)
+```
+MV vs NMV: question RT
+```{r}
+mv_CB_Q <- subset(final_SPL_CB_Q, CONDITION == 'MV')
+nmv_CB_Q <- subset(final_SPL_CB_Q, CONDITION == 'NMV')
+
+mv_SC_Q <- subset(final_SPL_SC_Q, CONDITION == 'MV')
+nmv_SC_Q <- subset(final_SPL_SC_Q, CONDITION == 'NMV')
+
+print("t-test GP condition CB vs Blind")
+t.test(mv_CB_Q$RT, mv_SC_Q$RT)
+
+#Across Condition
+print("t-test CB Group GP vs NGP")
+t.test(mv_CB_Q$RT, nmv_CB_Q$RT)
+
+print("t-test NG condition CB vs Blind")
+t.test(nmv_CB_Q$RT, nmv_SC_Q$RT)
+
+print("t-test SC Group GP vs NGP")
+t.test(mv_SC_Q$RT, nmv_SC_Q$RT)
+```
+
+MV vs NMV: Move Verb1
+```{r}
+#Move Verb1
+mv_crit1_CB_S <- subset(mv_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb1')
+mv_crit1_SC_S <- subset(mv_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb1')
+
+#Across Condition
+nmv_crit1_CB_S <- subset(nmv_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb1')
+nmv_crit1_SC_S <- subset(nmv_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb1')
+```
+
+MV vs NMV: Move Verb2
+```{r}
+#Move Verb2
+mv_crit2_CB_S <- subset(mv_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb2')
+mv_crit2_SC_S <- subset(mv_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb2')
+
+#Across Condition
+nmv_crit2_CB_S <- subset(nmv_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb2')
+nmv_crit2_SC_S <- subset(nmv_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Verb2')
+
+print("t-test MV condition CB vs SC")
+t.test(mv_crit2_CB_S$RT, mv_crit2_SC_S$RT)
+
+print("t-test CB Group MV vs NMV")
+t.test(mv_crit2_CB_S$RT, nmv_crit2_CB_S$RT)
+
+print("t-test NMV condition CB vs SC")
+t.test(nmv_crit2_CB_S$RT, nmv_crit2_SC_S$RT)
+
+print("t-test SC Group MV vs NMV")
+t.test(mv_crit2_SC_S$RT, nmv_crit2_SC_S$RT)
+
+print("CB MV SD")
+sd(mv_crit2_CB_S$RT)
+print("CB NMV SD")
+sd(nmv_crit2_CB_S$RT)
+print("SC MV SD")
+sd(mv_crit2_SC_S$RT)
+print("SC NMV SD")
+sd(nmv_crit2_SC_S$RT)
+```
+
+
+```{r}
+#posterior
+gp_post_CB_S <- subset(gp_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration")], Seg == 'seg07')
+gp_post_SC_S <- subset(gp_SC_S[c("CONDITION", "Item", "ID","Correct","Seg", "RT", "RT+Duration")], Seg == 'seg07')
+
+
+#Across Condition
+ng_post_CB_S <- subset(ng_CB_S[c("CONDITION", "Item", "ID","Correct","Seg", "RT", "RT+Duration")], Seg == 'seg08')
+ng_post_SC_S <- subset(ng_SC_S[c("CONDITION", "Item", "ID","Correct","Seg", "RT", "RT+Duration")], Seg == 'seg08')
+
+
+print("CB GP Post SD")
+sd(gp_post_CB_S$RT)
+print("CB NG Post SD")
+sd(ng_post_CB_S$RT)
+print("SC GP Post SD")
+sd(ng_post_SC_S$RT)
+print("SC NG Post SD")
+sd(ng_post_SC_S$RT)
+
+print("Group: GP condition CB vs SC")
+t.test(gp_post_CB_S$RT, gp_post_SC_S$RT)
+print("Group: NG condition CB vs SC")
+t.test(ng_post_CB_S$RT, ng_post_SC_S$RT)
+print("Condition: CB group GP vs NG")
+t.test(gp_post_CB_S$RT, ng_post_CB_S$RT)
+print("Condition: SC group GP vs NG")
+t.test(gp_post_SC_S$RT, ng_post_SC_S$RT)
+
+```
+
+MV vs NMV: Post
+```{r}
+#postical segment within CONDITION across GROUP
+mv_post_CB_S <- subset(mv_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Post')
+mv_post_SC_S <- subset(mv_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Post')
+
+#Across Condition
+nmv_post_CB_S <- subset(nmv_CB_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Post')
+nmv_post_SC_S <- subset(nmv_SC_S[c("CONDITION", "Item", "ID","Correct", "Seg","RT", "RT+Duration", "Crit")], Crit == 'Post')
+
+print("CB MV Post SD")
+sd(mv_post_CB_S$RT)
+print("CB NMV Post SD")
+sd(nmv_post_CB_S$RT)
+print("SC MV Post SD")
+sd(nmv_post_SC_S$RT)
+print("SC NMV Post SD")
+sd(nmv_post_SC_S$RT)
+
+print("Group: MV condition CB vs SC")
+t.test(mv_post_CB_S$RT, mv_post_SC_S$RT)
+print("Group: NMV condition CB vs SC")
+t.test(nmv_post_CB_S$RT, nmv_post_SC_S$RT)
+print("Condition: CB group MV vs NMV")
+t.test(mv_post_CB_S$RT, nmv_post_CB_S$RT)
+print("Condition: SC group MV vs NMV")
+t.test(mv_post_SC_S$RT, nmv_post_SC_S$RT)
+```
+
+
+#h3 GP NGP condition 2000ms offset and log transformation
+```{r}
+gp_crit_CB_S$Group = 0
+gp_crit_SC_S$Group = 1
+
+ng_crit_CB_S$Group = 0
+ng_crit_SC_S$Group = 1
+
+gp_crit_df <- data.frame(rbind(gp_crit_CB_S, gp_crit_SC_S, ng_crit_CB_S, ng_crit_SC_S))
+
+gp_crit_df$ln_RT <- log(gp_crit_df$RT+2000)
+#gp_crit_CB_S$ln_RT_Duration <- log(gp_crit_df$RT.Duration)
+
+
+#posterior
+gp_post_CB_S$Group = 0
+gp_post_SC_S$Group = 1
+
+ng_post_CB_S$Group = 0
+ng_post_SC_S$Group = 1
+
+gp_post_df <- data.frame(rbind(gp_post_CB_S, gp_post_SC_S, ng_post_CB_S, ng_post_SC_S))
+
+gp_post_df$ln_RT <- log(gp_post_df$RT+2000)
+```
+
+TODO: 
+violin plot for question reaction time
+TODO: run linear model (with and without log) for critical and posterior
+TODO: compare avg across RT in blind and sighted groups
+
+#h3 LMM in GP critical region
+```{r}
+log_gp_crit_lm <- lmer(ln_RT ~ CONDITION * Group + (1|Item) + (1|ID), data = gp_crit_df, REML = FALSE,control = lmerControl())
+anova(log_gp_crit_lm)
+summary(log_gp_crit_lm)
+
+#post_hoc <- aov(ln_RT ~ CONDITION * Group, data=gp_crit_df)
+
+# #using nlme
+# log_gp_crit_lm1 <- lme(ln_RT~CONDITION * Group ,random=(~1|Item),data=gp_crit_df)
+# anova(log_gp_crit_lm1)
+# summary(log_gp_crit_lm1)
+```
+
+#h3 post-transformation LM in GP posterior region
+```{r}
+log_gp_post_lm <- lmer(ln_RT ~ CONDITION * Group + (1|Item) + (1|ID), data = gp_post_df, REML = FALSE,control = lmerControl())
+anova(log_gp_post_lm)
+#summary(log_gp_post_lm)
+```
+
+
+#h3 post-hoc t-tests with LM transformation applied
+#h4 GP condition Critical Segment 
+```{r}
+# hist(subset(gp_crit_df, CONDITION == 'GP' & Group == 0)$ln_RT)
+
+print("t-test GP condition CB vs Blind")
+t.test(subset(gp_crit_df, CONDITION == 'GP' & Group == 0)$ln_RT, subset(gp_crit_df, CONDITION == 'GP' & Group == 1)$ln_RT)
+
+print("t-test CB Group GP vs NGP")
+t.test(subset(gp_crit_df, CONDITION == 'GP' & Group == 0)$ln_RT, subset(gp_crit_df, CONDITION == 'NG' & Group == 0)$ln_RT)
+
+print("t-test NG condition CB vs Blind")
+t.test(subset(gp_crit_df, CONDITION == 'NG' & Group == 0)$ln_RT, subset(gp_crit_df, CONDITION == 'NG' & Group == 1)$ln_RT)
+
+print("t-test SC Group GP vs NGP")
+t.test(subset(gp_crit_df, CONDITION == 'GP' & Group == 1)$ln_RT, subset(gp_crit_df, CONDITION == 'NG' & Group == 1)$ln_RT)
+
+print("CB GP SD")
+sd(subset(gp_crit_df, CONDITION == 'GP' & Group == 0)$ln_RT)
+
+
+print("CB NG SD")
+sd(subset(gp_crit_df, CONDITION == 'NG' & Group == 0)$ln_RT)
+
+
+print("SC GP SD")
+sd(subset(gp_crit_df, CONDITION == 'GP' & Group == 1)$ln_RT)
+print("SC NG SD")
+sd(subset(gp_crit_df, CONDITION == 'NG' & Group == 1)$ln_RT)
+```
+
+
+#h3 post-hoc t-tests with LM transformation applied
+#h4 GP condition Posterior Segment 
+```{r}
+# hist(subset(gp_post_df, CONDITION == 'GP' & Group == 0)$ln_RT)
+
+print("t-test GP condition CB vs Blind")
+t.test(subset(gp_post_df, CONDITION == 'GP' & Group == 0)$ln_RT, subset(gp_post_df, CONDITION == 'GP' & Group == 1)$ln_RT)
+
+print("t-test CB Group GP vs NGP")
+t.test(subset(gp_post_df, CONDITION == 'GP' & Group == 0)$ln_RT, subset(gp_post_df, CONDITION == 'NG' & Group == 0)$ln_RT)
+
+print("t-test NG condition CB vs Blind")
+t.test(subset(gp_post_df, CONDITION == 'NG' & Group == 0)$ln_RT, subset(gp_post_df, CONDITION == 'NG' & Group == 1)$ln_RT)
+
+print("t-test SC Group GP vs NGP")
+t.test(subset(gp_post_df, CONDITION == 'GP' & Group == 1)$ln_RT, subset(gp_post_df, CONDITION == 'NG' & Group == 1)$ln_RT)
+
+print("CB GP SD")
+sd(subset(gp_post_df, CONDITION == 'GP' & Group == 0)$ln_RT)
+
+
+print("CB NG SD")
+sd(subset(gp_post_df, CONDITION == 'NG' & Group == 0)$ln_RT)
+
+
+print("SC GP SD")
+sd(subset(gp_post_df, CONDITION == 'GP' & Group == 1)$ln_RT)
+print("SC NG SD")
+sd(subset(gp_post_df, CONDITION == 'NG' & Group == 1)$ln_RT)
+```
+
+
+#h3 MV NMV condition 2000ms offset and log transformation
+```{r}
+mv_crit1_CB_S$Group = 0
+mv_crit1_SC_S$Group = 1
+
+nmv_crit1_CB_S$Group = 0
+nmv_crit1_SC_S$Group = 1
+
+mv_crit1_df <- data.frame(rbind(mv_crit1_CB_S, mv_crit1_SC_S, nmv_crit1_CB_S, nmv_crit1_SC_S))
+
+mv_crit1_df$ln_RT <- log(mv_crit1_df$RT+1000)
+
+
+mv_crit2_CB_S$Group = 0
+mv_crit2_SC_S$Group = 1
+
+nmv_crit2_CB_S$Group = 0
+nmv_crit2_SC_S$Group = 1
+
+mv_crit2_df <- data.frame(rbind(mv_crit2_CB_S, mv_crit2_SC_S, nmv_crit2_CB_S, nmv_crit2_SC_S))
+
+mv_crit2_df$ln_RT <- log(mv_crit2_df$RT+2000)
+#mv_crit2_CB_S$ln_RT_Duration <- log(mv_crit2_df$RT.Duration)
+
+#posterior
+mv_post_CB_S$Group = 0
+mv_post_SC_S$Group = 1
+
+nmv_post_CB_S$Group = 0
+nmv_post_SC_S$Group = 1
+
+mv_post_df <- data.frame(rbind(mv_post_CB_S, mv_post_SC_S, nmv_post_CB_S, nmv_post_SC_S))
+
+mv_post_df$ln_RT <- log(mv_post_df$RT+2000)
+```
+
+#h3 LM in MV critical region Verb 1
+```{r}
+log_mv_crit1_lm <- lmer(ln_RT ~ CONDITION * Group + (1|Item) + (1|ID), data = mv_crit1_df, REML = FALSE,control = lmerControl())
+anova(log_mv_crit1_lm)
+summary(log_mv_crit1_lm)
+```
+
+
+#h3 LM in MV critical region Verb 2
+```{r}
+log_mv_crit2_lm <- lmer(ln_RT ~ CONDITION * Group + (1|Item) + (1|ID), data = mv_crit2_df, REML = FALSE,control = lmerControl())
+anova(log_mv_crit2_lm)
+summary(log_mv_crit2_lm)
+```
+
+#h3 post-hoc t-tests with LM transformation applied
+#h4 MV condition Critical Segment 
+```{r}
+# hist(subset(mv_crit2_df, CONDITION == 'mv' & Group == 0)$ln_RT)
+
+print("t-test MV condition CB vs Blind")
+t.test(subset(mv_crit2_df, CONDITION == 'MV' & Group == 0)$ln_RT, subset(mv_crit2_df, CONDITION == 'MV' & Group == 1)$ln_RT)
+
+print("t-test CB Group MV vs NMV")
+t.test(subset(mv_crit2_df, CONDITION == 'MV' & Group == 0)$ln_RT, subset(mv_crit2_df, CONDITION == 'NMV' & Group == 0)$ln_RT)
+
+print("t-test NMV condition CB vs Blind")
+t.test(subset(mv_crit2_df, CONDITION == 'NMV' & Group == 0)$ln_RT, subset(mv_crit2_df, CONDITION == 'NMV' & Group == 1)$ln_RT)
+
+print("t-test SC Group MV vs NMV")
+t.test(subset(mv_crit2_df, CONDITION == 'MV' & Group == 1)$ln_RT, subset(mv_crit2_df, CONDITION == 'NMV' & Group == 1)$ln_RT)
+
+print("CB MV SD")
+sd(subset(mv_crit2_df, CONDITION == 'MV' & Group == 0)$ln_RT)
+
+
+print("CB NMV SD")
+sd(subset(mv_crit2_df, CONDITION == 'NMV' & Group == 0)$ln_RT)
+
+print("SC MV SD")
+sd(subset(mv_crit2_df, CONDITION == 'MV' & Group == 1)$ln_RT)
+print("SC NMV SD")
+sd(subset(mv_crit2_df, CONDITION == 'NMV' & Group == 1)$ln_RT)
+```
+
+
+#h3 post-transformation LM in MV posterior region
+```{r}
+log_mv_post_lm <- lmer(ln_RT ~ CONDITION * Group + (1|Item) + (1|ID), data = mv_post_df, REML = FALSE,control = lmerControl())
+anova(log_mv_post_lm)
+summary(log_mv_post_lm)
+```
+
+#h3 post-hoc t-tests with LM transformation applied
+#h4 MV condition Posterior Segment 
+```{r}
+#hist(subset(mv_post_df, CONDITION == 'NMV' & Group == 1)$ln_RT)
+
+print("t-test mv condition CB vs SC")
+t.test(subset(mv_post_df, CONDITION == 'MV' & Group == 0)$ln_RT, subset(mv_post_df, CONDITION == 'MV' & Group == 1)$ln_RT)
+
+print("t-test CB Group MV vs NMV")
+t.test(subset(mv_post_df, CONDITION == 'MV' & Group == 0)$ln_RT, subset(mv_post_df, CONDITION == 'NMV' & Group == 0)$ln_RT)
+
+print("t-test nmv condition CB vs SC")
+t.test(subset(mv_post_df, CONDITION == 'NMV' & Group == 0)$ln_RT, subset(mv_post_df, CONDITION == 'NMV' & Group == 1)$ln_RT)
+
+print("t-test SC Group MV vs NMV")
+t.test(subset(mv_post_df, CONDITION == 'MV' & Group == 1)$ln_RT, subset(mv_post_df, CONDITION == 'NMV' & Group == 1)$ln_RT)
+
+print("CB MV SD")
+sd(subset(mv_post_df, CONDITION == 'MV' & Group == 0)$ln_RT)
+
+
+print("CB NMV SD")
+sd(subset(mv_post_df, CONDITION == 'NMV' & Group == 0)$ln_RT)
+
+
+print("SC MV SD")
+sd(subset(mv_post_df, CONDITION == 'MV' & Group == 1)$ln_RT)
+print("SC NMV SD")
+sd(subset(mv_post_df, CONDITION == 'NMV' & Group == 1)$ln_RT)
+```

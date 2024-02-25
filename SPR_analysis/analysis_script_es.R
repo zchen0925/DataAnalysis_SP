@@ -1,0 +1,691 @@
+library(tidyverse)
+library(stringr)
+library(ggplot2)
+library(scales)
+library(readxl)
+library(dplyr)
+library(nortest)
+library(janitor)
+library(data.table)
+library("gridExtra") 
+library("lme4")
+library("plotrix") 
+#detach(package:plyr)
+
+ORIG_SENTENCES = 1840
+ORIG_SEGS = 17750
+
+ALL_CONDS = c('GP', 'NG', 'MV', 'NMV', 'FL','DGI','DGP','DBI','DBP')
+CONDS = c('GP', 'NG', 'MV', 'NMV')
+CONDS1 = c('GP', 'NG', 'MV', 'NMV', 'FL')
+GP_CRIT <- list(c('GP','seg07'), c('NG','seg08'),  c('GP','seg08'), c('NG','seg09'))
+MV_CRIT <- list(c('MV','CRIT01'), c('MV','CRIT02'),c('MV','CRIT03'),c('NMV','CRIT01'),c('NMV','CRIT02'),c('NMV','CRIT03'))
+
+GP_first <- list(c('GP','seg07'), c('NG','seg08'))
+ANALYSIS_CONDS <- as.vector(c('GP', 'NG', 'MV', 'NMV'))
+
+raw_SPR_SC <- read_xlsx("SPR_SC_Matched.xlsx")
+
+raw_acc <- accuracy_by_cond(data = raw_SPR_SC, acc_conds = ALL_CONDS, within_subject = FALSE)
+plot_acc(acc.data = raw_acc, conds = ALL_CONDS, rounding_decimal = 2, title = "Raw Accuracy",within_subject = FALSE)
+plot_acc(acc.data = raw_acc, conds = CONDS, rounding_decimal = 2, title = "Raw Accuracy",within_subject = FALSE)
+raw_acc_ind <- accuracy_by_cond(data = raw_SPR_SC, acc_conds = ALL_CONDS, within_subject = TRUE)
+plot_acc(acc.data = raw_acc_ind, conds = c('FL'), rounding_decimal = 3, title = "Filler Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+plot_acc(acc.data = raw_acc_ind, conds = CONDS1, rounding_decimal = 1, title = "Individual Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+plot_acc(acc.data = raw_acc_ind, conds = c('GP', 'NG'), rounding_decimal = 1, title = "GP, NG Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+plot_acc(acc.data = raw_acc_ind, conds = c('MV', 'NMV'), rounding_decimal = 1, title = "MV, NMV Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+
+
+resp_boxplot(data = raw_SPR_SC, title = "Raw GP Question Response Time", conds = c("GP"),within_subject = TRUE)
+resp_boxplot(data = raw_SPR_SC, title = "Raw NG Question Response Time", conds = c("NG"),within_subject = TRUE)
+resp_boxplot(data = raw_SPR_SC, title = "Raw GP, NGP Question Response Time", conds = c("GP","NG"),within_subject = FALSE)
+resp_boxplot(data = raw_SPR_SC, title = "Raw GP, NGP Question Response Time", conds = c("GP","NG"),within_subject = TRUE)
+
+resp_boxplot(data = raw_SPR_SC, title = "Raw MV Question Response Time", conds = c("MV"),within_subject = TRUE)
+resp_boxplot(data = raw_SPR_SC, title = "Raw NMV Question Response Time", conds = c("NMV"),within_subject = TRUE)
+resp_boxplot(data = raw_SPR_SC, title = "Raw MV, NMV Question Response Time", conds = c("MV","NMV"),within_subject = FALSE)
+resp_boxplot(data = raw_SPR_SC, title = "Raw MV, NMV Question Response Time", conds = c("MV","NMV"),within_subject = TRUE)
+
+resp_boxplot(data = raw_SPR_SC, title = "Raw Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = TRUE)
+resp_boxplot(data = raw_SPR_SC, title = "Raw Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = FALSE)
+
+
+#STEP1: exclude subjects with fillers < 80%-=========
+
+#==========Q.Step1=========
+Q_step1_8s_SPR_SC <- subset(raw_SPR_SC, (Seg  == 'question' & RT <= 8000) | Seg != 'question')
+
+#BELOW 2 LINES OPTION STEP CHECKING NUMBERS
+excl_8s <- perc_excluded(raw_data = raw_SPR_SC, filtered_data = Q_step1_8s_SPR_SC, conds = c("GP","NG"), within_subject = FALSE)
+excl_8s_indv <- perc_excluded(raw_data = raw_SPR_SC, filtered_data = Q_step1_8s_SPR_SC, conds = c("GP","NG"),within_subject = TRUE)
+
+excl_8s_all <- perc_excluded(raw_data = raw_SPR_SC, filtered_data = Q_step1_8s_SPR_SC, conds = c("GP","NG","MV","NMV"), within_subject = FALSE)
+
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = Q_step1_8s_SPR_SC, conds = c("GP","NG"),remain_or_lost = "remain",title = "GP, NG filtered Question RT <= 8s",within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = Q_step1_8s_SPR_SC, conds = c("MV","NMV"),remain_or_lost = "remain",title = "MV, NMV filtered Question RT <= 8s",within_subject = TRUE)
+
+plot_perc_excluded(raw_SPR_SC, Q_step1_8s_SPR_SC,conds=c("GP","NG","MV","NMV"),remain_or_lost = "remain",title="4 Exp Conds filtered Question RT <= 8s",within_subject = FALSE, within_cond = TRUE)
+
+
+resp_boxplot(data = Q_step1_8s_SPR_SC, title = "<=8S Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = TRUE)
+resp_boxplot(data = Q_step1_8s_SPR_SC, title = "<=8S Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = FALSE)
+
+
+#==============Q.Step2===============
+#replace question RTs 3SD above or below with the subject RT mean within condition
+qSD_list <- list(list('GP','question'),list('NG','question'),list('MV','question'),list('NMV','question'))
+qSD_filters <- generate_filters(data = Q_step1_8s_SPR_SC,filter_segs = qSD_list, range = 3, method="sd")
+
+q_replaced <- data.frame(matrix(ncol = ncol(Q_step1_8s_SPR_SC), nrow = 0))
+colnames(q_replaced) <- colnames(Q_step1_8s_SPR_SC)
+Q_step2_3SD_SPR_SC <- Q_step1_8s_SPR_SC
+for (q_filt in qSD_filters){
+  list <- replaceRT(Q_step2_3SD_SPR_SC, q_filt, 3, replace_w_mean = TRUE)
+  Q_step2_3SD_SPR_SC <- list$data
+  q_replaced <- rbind(q_replaced, list$replaced)
+}
+
+excl_q3SD_from_step1 <- perc_excluded(raw_data = Q_step1_8s_SPR_SC, filtered_data = q_replaced, conds = c("GP","NG","MV","NMV"), within_subject = FALSE)
+excl_q3SD_from_raw <- perc_excluded(raw_data = raw_SPR_SC, filtered_data = q_replaced, conds = c("GP","NG","MV","NMV"), within_subject = FALSE)
+
+
+plot_perc_excluded(raw_data = Q_step1_8s_SPR_SC, filtered_data = q_replaced, conds = c("GP","NG"),digits = 0.1, remain_or_lost = "lost",title = "% GP, NG Question RTs replaced with mean RT", within_subject = TRUE)
+plot_perc_excluded(raw_data = Q_step1_8s_SPR_SC, filtered_data = q_replaced, conds = c("GP","NG"),remain_or_lost = "lost",title = "% GP, NG Question RTs replaced with mean RT",within_subject = FALSE)
+
+plot_perc_excluded(raw_data = Q_step1_8s_SPR_SC, filtered_data = q_replaced, conds = c("MV","NMV"),digits = 0.1, remain_or_lost = "lost",title = "% MV, NMV Question RTs replaced with mean RT",within_subject = TRUE)
+plot_perc_excluded(raw_data = Q_step1_8s_SPR_SC, filtered_data = q_replaced, conds = c("MV","NMV"),remain_or_lost = "lost",title = "% MV, NMV Question RTs replaced with mean RT",within_subject = FALSE)
+
+plot_perc_excluded(raw_data = Q_step1_8s_SPR_SC, filtered_data = q_replaced, conds = c('GP','NG',"MV","NMV"),remain_or_lost = "lost",title = "Filtered % Question RTs replaced with mean RT",within_subject = FALSE)
+
+resp_boxplot(data = Q_step2_3SD_SPR_SC, title = "Filtered and Replaced (with Mean) GP, NGP Question Response Time", conds = c("GP","NG"),within_subject = FALSE)
+resp_boxplot(data = Q_step2_3SD_SPR_SC, title = "Filtered and Replaced (with Mean) GP, NGP Question Response Time", conds = c("GP","NG"),within_subject = TRUE)
+
+resp_boxplot(data = Q_step2_3SD_SPR_SC, title = "Filtered and Replaced (with Mean) MV, NMV Question Response Time", conds = c("MV","NMV"),within_subject = FALSE)
+resp_boxplot(data = Q_step2_3SD_SPR_SC, title = "Filtered and Replaced (with Mean) MV, NMV Question Response Time", conds = c("MV","NMV"),within_subject = TRUE)
+
+#After Q.Step2: check question RT final percentage=============
+q_replaced <- rbind(q_replaced, subset(raw_SPR_SC,Seg == 'question' & RT > 8000))
+excl_q_from_raw <- perc_excluded(raw_data = raw_SPR_SC, filtered_data = q_replaced, conds = c("GP","NG","MV","NMV"), within_subject = FALSE)
+
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = q_replaced, conds = c("GP","NG"),remain_or_lost = "lost",title = "Final GP, NG Question % filtered or replaced\n baseline: raw results", within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = q_replaced, conds = c("MV","NMV"),remain_or_lost = "lost",title = "Final MV, NMV Question % filtered or replaced\n baseline: raw results",within_subject = TRUE)
+
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = q_replaced, conds = c("GP","NG","MV","NMV"),remain_or_lost = "lost",title = "Final % Question RT filtered or replaced\n baseline: raw results",within_subject = FALSE)
+
+
+
+#S.Step1A =================== replace individual segment outliers beyond 3SD with the mean=======reading experiment only: no filtering out slow outliers to match with blind =========================
+S_step1_3SD_SPR_SC <- raw_SPR_SC
+segs_list <- list(list('GP','seg01'),list('GP','seg02'),list('GP','seg03'),list('GP','seg04'),list('GP','seg05'),list('GP','seg06'),list('GP','seg07'), list('GP','seg08'), list('GP','seg09'),  
+                  list('NG','seg01'),  list('NG','seg02'),list('NG','seg03'),  list('NG','seg04'),list('NG','seg05'),  list('NG','seg06'),list('NG','seg07'),  list('NG','seg08'),list('NG','seg09'),  list('NG','seg10'),
+                  list('MV','seg01'),  list('MV','seg02'),list('MV','seg03'),  list('MV','seg04'),list('MV','seg05'),  list('MV','seg06'),list('MV','seg07'),  list('MV','seg08'),list('MV','seg09'),  list('MV','seg10'),list('MV','seg11'),list('MV','seg12'),list('MV','seg13'),list('MV','seg14'),list('MV','seg15'),list('MV','seg16'),list('MV','seg17'),list('MV','CRIT01'),list('MV','CRIT02'),list('MV','CRIT03'),list('MV','total_duration'),
+                  list('NMV','seg01'),  list('NMV','seg02'),list('NMV','seg03'),  list('NMV','seg04'),list('NMV','seg05'),  list('NMV','seg06'),list('NMV','seg07'),  list('NMV','seg08'),list('NMV','seg09'),  list('NMV','seg10'),list('NMV','seg11'),list('NMV','seg12'),list('NMV','seg13'),list('NMV','seg14'),list('NMV','seg15'),list('NMV','seg16'),list('NMV','seg17'),list('NMV','CRIT01'),list('NMV','CRIT02'),list('NMV','CRIT03'),list('NMV','total_duration')
+)
+seg_filters <- generate_filters(data = S_step1_3SD_SPR_SC,filter_segs = segs_list, range = 3, method="sd")
+segs_replaced <- data.frame(matrix(ncol = ncol(S_step1_3SD_SPR_SC), nrow = 0))
+colnames(segs_replaced) <- colnames(S_step1_3SD_SPR_SC)
+
+for (s_f in seg_filters){
+  s_f <- na.omit(s_f)
+  list <- replaceRT(S_step1_3SD_SPR_SC, s_f, 3)
+  S_step1_3SD_SPR_SC <- list$data
+  segs_replaced <- rbind(segs_replaced, list$replaced)
+}
+
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = segs_replaced, conds = c("GP","NG"),digits = 0.1, remain_or_lost = "lost",title = "GP, NG indv seg RT beyond 3SD that were replaced", dropped_single_seg = TRUE,within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = segs_replaced, conds = c("MV","NMV"),digits = 0.1,remain_or_lost = "lost",title = "MV, NMV indv seg RT beyond 3SD that were replaced",dropped_single_seg = TRUE,within_subject = TRUE)
+excl_s_all_from_raw <- perc_excluded(raw_data = raw_SPR_SC, filtered_data = segs_replaced, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE,within_subject = FALSE)
+excl_s_all_ind_from_raw <- perc_excluded(raw_data = raw_SPR_SC, filtered_data = segs_replaced, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE,within_subject = TRUE)
+
+plot_perc_excluded(raw_data = raw_SPR_SC, filtered_data = segs_replaced, conds = c("GP","NG","MV","NMV"),remain_or_lost = "lost",title = "Final Segment RT after replacement/nDenominator: raw results/nIncluded % from step 1",dropped_single_seg = TRUE,within_subject = FALSE)
+
+final_SPR_SC_Q <- subset(Q_step2_3SD_SPR_SC, CONDITION %in% c('GP','NG','FL','MV','NMV') & Seg == "question")
+final_SPR_SC_S <- subset(S_step1_3SD_SPR_SC,CONDITION %in% c('GP','NG','FL','MV','NMV') & Seg != "question")
+
+#===========Sighted controls SPL=========
+#SPL CB================
+ALL_CONDS = c('GP', 'NG', 'MV', 'NMV', 'FL')
+CONDS = c('GP', 'NG', 'MV', 'NMV')
+ANALYSIS_CONDS <- as.vector(c('GP', 'NG', 'MV', 'NMV'))
+#=======GP
+GP_CRIT <- list(c('GP','seg06'), c('NG','seg07'))
+GP_PRE1 <- list(c('GP','seg04'),  c('NG','seg05'))
+GP_PRE2 <- list(c('GP','seg05'),  c('NG','seg06'))
+GP_POST <- list(c('GP','seg07'), c('NG','seg08'))
+
+#======MOVE
+#MV_SEGMENTS <- list(c('MV','seg06'),c('MV','seg07'),c('NMV','seg06'),c('NMV','seg07'))
+MV_CRIT1 <- list(c('MV','seg06'),c('NMV','seg06'))
+MV_CRTI2<- list(c('MV','seg07'),c('NMV','seg07'))
+
+raw_SPL_SC <- read_xlsx("SPL_SC_Matched.xlsx")
+raw_SPL_SC <- reorderConds(raw_SPL_SC, ALL_CONDS)
+
+raw_acc_cb <- accuracy_by_cond(data = raw_SPL_CB, acc_conds = ALL_CONDS, within_subject = FALSE)
+plot_acc(acc.data = raw_acc, conds = ALL_CONDS, rounding_decimal = 2, title = "Raw Accuracy",within_subject = FALSE)
+plot_acc(acc.data = raw_acc, conds = CONDS, rounding_decimal = 2, title = "Raw Accuracy",within_subject = FALSE)
+raw_acc_ind_cb <- accuracy_by_cond(data = raw_SPL_CB, acc_conds = ALL_CONDS, within_subject = TRUE)
+plot_acc(acc.data = raw_acc_ind_cb, conds = c('FL'), rounding_decimal = 3, title = "Filler Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+#plot_acc(acc.data = raw_acc_ind, conds = CONDS1, rounding_decimal = 1, title = "Individual Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+plot_acc(acc.data = raw_acc_ind, conds = c('GP', 'NG'), rounding_decimal = 1, title = "GP, NG Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+plot_acc(acc.data = raw_acc_ind, conds = c('MV', 'NMV'), rounding_decimal = 1, title = "MV, NMV Accuracy within Condition",within_subject = TRUE, by_id = TRUE)
+
+
+
+resp_boxplot(data = raw_SPL_SC, title = "Raw GP Question Response Time", conds = c("GP"),within_subject = TRUE)
+resp_boxplot(data = raw_SPL_SC, title = "Raw NG Question Response Time", conds = c("NG"),within_subject = TRUE)
+resp_boxplot(data = raw_SPL_SC, title = "Raw GP, NGP Question Response Time", conds = c("GP","NG"),within_subject = FALSE)
+resp_boxplot(data = raw_SPL_SC, title = "Raw GP, NGP Question Response Time", conds = c("GP","NG"),within_subject = TRUE)
+
+resp_boxplot(data = raw_SPL_SC, title = "Raw MV Question Response Time", conds = c("MV"),within_subject = TRUE)
+resp_boxplot(data = raw_SPL_SC, title = "Raw NMV Question Response Time", conds = c("NMV"),within_subject = TRUE)
+resp_boxplot(data = raw_SPL_SC, title = "Raw MV, NMV Question Response Time", conds = c("MV","NMV"),within_subject = FALSE)
+resp_boxplot(data = raw_SPL_SC, title = "Raw MV, NMV Question Response Time", conds = c("MV","NMV"),within_subject = TRUE)
+
+resp_boxplot(data = raw_SPL_SC, title = "Raw Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = TRUE)
+resp_boxplot(data = raw_SPL_SC, title = "Raw Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = FALSE)
+
+#==========Question Step1 8s=========
+#Prev STEP3 is now Q.Step1
+resp_boxplot(data = raw_SPL_SC, title = "Raw Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = FALSE)
+Q_step1_8s_SPL_SC <- subset(raw_SPL_SC, (Seg  == 'question' & RT <= 8000) | Seg != 'question')
+
+excl_8s <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = Q_step1_8s_SPL_SC, conds = c("GP","NG","MV","NMV"), within_subject = FALSE)
+excl_8s_indv <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = Q_step1_8s_SPL_SC, conds = c("GP","NG",'MV','NMV'),within_subject = TRUE)
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = Q_step1_8s_SPL_SC, conds = c("GP","NG"),remain_or_lost = "remain",title = "GP, NG filtered Question RT <= 8s",within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = Q_step1_8s_SPL_SC, conds = c("GP","NG"),remain_or_lost = "remain",title = "GP, NG filtered Question RT <= 8s", within_subject = FALSE)
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = Q_step1_8s_SPL_SC, conds = c("MV","NMV"),remain_or_lost = "remain",title = "MV, NMV filtered Question RT <= 8s",within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = Q_step1_8s_SPL_SC, conds = c("MV","NMV"),remain_or_lost = "remain",title = "MV, NMV data loss Question RT <= 8s",within_subject = FALSE)
+
+plot_perc_excluded(raw_SPL_SC, Q_step1_8s_SPL_SC,conds=c("GP","NG","MV","NMV"),remain_or_lost = "remain",title="4 Exp Conds filtered Question RT <= 8s",within_subject = TRUE, within_cond = TRUE)
+plot_perc_excluded(raw_SPL_SC, Q_step1_8s_SPL_SC,conds=c("GP","NG","MV","NMV"),remain_or_lost = "remain",title="4 Exp Conds filtered Question RT <= 8s",within_subject = FALSE, within_cond = TRUE)
+
+resp_boxplot(data = Q_step1_8s_SPL_SC, title = "<=8S Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = TRUE)
+resp_boxplot(data = Q_step1_8s_SPL_SC, title = "<=8S Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV', 'FL'), order = c('GP', 'NG', 'MV', 'NMV', 'FL'), within_subject = FALSE)
+
+#prev STEP4, now Q.STPE2
+#QStep2===============replace question RTs that are 3SD above or below with the mean RT within subject within condition
+qSD_list <- list(list('GP','question'),list('NG','question'),list('MV','question'),list('NMV','question'))
+qSD_filters <- generate_filters(data = Q_step1_8s_SPL_SC,filter_segs = qSD_list, range = 3, method="sd")
+
+qSD_replaced <- data.frame(matrix(ncol = ncol(Q_step1_8s_SPL_SC), nrow = 0))
+colnames(qSD_replaced) <- colnames(Q_step1_8s_SPL_SC)
+Q_step2_3SD_SPL_SC <- Q_step1_8s_SPL_SC
+for (q_filt in qSD_filters){
+  list <- replaceRT(Q_step2_3SD_SPL_SC, q_filt, 3,replace_w_mean = TRUE)
+  Q_step2_3SD_SPL_SC <- list$data
+  qSD_replaced <- rbind(qSD_replaced, list$replaced)
+}
+
+excl_q3SD <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG","MV","NMV"), within_subject = FALSE)
+excl_q3SD_indv <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG",'MV','NMV'),within_subject = TRUE)
+
+
+plot_perc_excluded(raw_data = Q_step1_8s_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG"),remain_or_lost = "lost",title = "% GP, NG Question RTs Replaced with the Mean", within_subject = TRUE)
+plot_perc_excluded(raw_data = Q_step1_8s_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG"),remain_or_lost = "lost",title = "% GP, NG Question RTs Replaced with the Mean",within_subject = FALSE)
+
+plot_perc_excluded(raw_data = Q_step1_8s_SPL_SC, filtered_data = qSD_replaced, conds = c("MV","NMV"),remain_or_lost = "lost",title = "% MV, NMV RTs Replaced with the Mean",within_subject = TRUE)
+plot_perc_excluded(raw_data = Q_step1_8s_SPL_SC, filtered_data = qSD_replaced, conds = c("MV","NMV"),remain_or_lost = "lost",title = "% MV, NMV Question RTs Replaced with the Mean",within_subject = FALSE)
+
+plot_perc_excluded(raw_data = Q_step1_8s_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG","MV","NMV"),remain_or_lost = "lost",title = "GP, NG, MV, NMV Question RT beyond 3SD that were replaced with the mean",within_subject = FALSE)
+qSD_replaced <- rbind(qSD_replaced, subset(raw_SPL_SC, (Seg == "question" & RT > 8000)))
+excl_q_all <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG","MV","NMV"), within_subject = FALSE)
+excl_q_all_indv <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG",'MV','NMV'),within_subject = TRUE)
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = qSD_replaced, conds = c("GP","NG","MV","NMV"),remain_or_lost = "lost",title = "Final filtered Questions RTs\nDenominator: Raw data\nstep 2(<= 8s)\nstep 3(within 3SD)",within_subject = FALSE)
+
+resp_boxplot(data = Q_step2_3SD_SPL_SC, title = "Final Filtered Question Response Time", conds = c('GP', 'NG'), order = c('GP', 'NG'), within_subject = TRUE)
+
+resp_boxplot(data = Q_step2_3SD_SPL_SC, title = "Final Filtered Question Response Time", conds = c('MV', 'NMV'), order = c('MV', 'NMV'), within_subject = TRUE)
+
+resp_boxplot(data = Q_step2_3SD_SPL_SC, title = "Final Filtered Question Response Time", conds = c('GP', 'NG', 'MV', 'NMV'), order = c('GP', 'NG', 'MV', 'NMV'), within_subject = FALSE)
+
+#==================S_step 1====
+#Sstep1: remove segment RT > 3000ms (3s)========
+S_step1_3s_SPL_SC <- subset(raw_SPL_SC, (Seg  != 'question' & Seg != 'combined_crit' & RT <= 3000) | (Seg == 'combined_crit' & RT <= 6000))
+
+excl_s_3s <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = S_step1_3s_SPL_SC, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE, within_subject = FALSE)
+excl_s_3s_ind <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = S_step1_3s_SPL_SC, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE,within_subject = TRUE)
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = S_step1_3s_SPL_SC, conds = c("GP","NG"),remain_or_lost = "remain",title = "GP, NG after dropping individual segments > 3.0s", dropped_single_seg = TRUE, within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = S_step1_3s_SPL_SC, conds = c("GP","NG"),remain_or_lost = "remain",title = "GP, NG after dropping individual segments > 3.0s", dropped_single_seg = TRUE,within_subject = FALSE)
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = S_step1_3s_SPL_SC, conds = c("MV","NMV"),remain_or_lost = "remain",title = "MV, NMV after dropping individual segments > 3.0s",dropped_single_seg = TRUE,within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = S_step1_3s_SPL_SC, conds = c("MV","NMV"),remain_or_lost = "remain",title = "MV, NMV after dropping individual segments > 3.0s",dropped_single_seg = TRUE,within_subject = FALSE)
+
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = S_step1_3s_SPL_SC, conds = c("GP","NG","MV","NMV"), remain_or_lost = "remain",title = "Experimental Conditions after dropping individual Segments RT > 3.0s",dropped_single_seg = TRUE,within_subject = FALSE)
+
+
+#S_step2
+#SPL: replace individual segment RT beyond 3SD with the mean within subject within segment ================================
+
+segs_list <- list(list('GP','seg01'),list('GP','seg02'),list('GP','seg03'),list('GP','seg04'),list('GP','seg05'),list('GP','seg06'),list('GP','seg07'),list('GP','combined_crit'),  
+                  list('NG','seg01'),  list('NG','seg02'),list('NG','seg03'),  list('NG','seg04'),list('NG','seg05'),  list('NG','seg06'),list('NG','seg07'),  list('NG','seg08'),list('NG','combined_crit'),  
+                  list('MV','seg01'),  list('MV','seg02'),list('MV','seg03'),  list('MV','seg04'),list('MV','seg05'),  list('MV','seg06'),list('MV','seg07'),  list('MV','seg08'),list('MV','combined_crit'),
+                  list('NMV','seg01'),  list('NMV','seg02'),list('NMV','seg03'),  list('NMV','seg04'),list('NMV','seg05'),  list('NMV','seg06'),list('NMV','seg07'),  list('NMV','seg08'),list('NMV','combined_crit'))
+seg_filters <- generate_filters(data = S_step1_3s_SPL_SC,filter_segs = segs_list, range = 3, method="sd")
+
+segs_replaced <- data.frame(matrix(ncol = ncol(S_step1_3s_SPL_SC), nrow = 0))
+colnames(segs_replaced) <- colnames(S_step1_3s_SPL_SC)
+S_step2_3SD_SPL_SC <- S_step1_3s_SPL_SC
+for (s_f in seg_filters){
+  s_f <- na.omit(s_f)
+  list <- replaceRT(S_step2_3SD_SPL_SC, s_f, 3, replace_w_mean = TRUE)
+  S_step2_3SD_SPL_SC <- list$data
+  segs_replaced <- rbind(segs_replaced, list$replaced)
+}
+excl_s_3SD <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = segs_replaced, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE, within_subject = FALSE)
+excl_s_3SD_ind <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = segs_replaced, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE,within_subject = TRUE)
+
+
+segs_replaced <- rbind(segs_replaced, subset(raw_SPL_SC, (Seg != 'question' & Seg != 'combined_crit' & RT > 3000)| (Seg == 'combined_crit' & RT > 6000)))
+excl_s_all <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = segs_replaced, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE, within_subject = FALSE)
+excl_s_all_ind <- perc_excluded(raw_data = raw_SPL_SC, filtered_data = segs_replaced, conds = c("GP","NG",'MV','NMV'), isQuestion=FALSE,within_subject = TRUE)
+
+
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = segs_replaced, digits = 0.1,conds = c("GP","NG"),remain_or_lost = "lost",title = "% GP, NG segment RTs replaced with the mean", dropped_single_seg = TRUE,within_subject = TRUE)
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = segs_replaced, digits = 0.1, conds = c("MV","NMV"),remain_or_lost = "lost",title = "% MV, NMV segment RTs replaced with the mean",dropped_single_seg = TRUE,within_subject = TRUE)
+plot_perc_excluded(raw_data = S_step1_3s_SPL_SC, filtered_data = segs_replaced, conds = c("GP","NG","MV","NMV"),remain_or_lost = "lost",title = "% Indv segs with RTs beyond +- 3SD replaced",dropped_single_seg = TRUE,within_subject = FALSE)
+
+plot_perc_excluded(raw_data = raw_SPL_SC, filtered_data = segs_replaced, conds = c("GP","NG","MV","NMV"),remain_or_lost = "lost",title = "Final Experimental Conditions after Indv segs with RTs beyond +- 3SD that were replaced\nDenominator: raw segments results\nS_step1: remove segment outliers with RT > 3.0s\nS_step2:remove segment outliers with RT beyond +- 3SD\nS_step3:remove segments in analysis truncated more than 20%",dropped_single_seg = TRUE,within_subject = FALSE) 
+
+final_SPL_SC_Q <- subset(Q_step2_3SD_SPL_SC, Seg == "question")
+final_SPL_SC_S <- S_step2_3SD_SPL_SC
+
+
+
+
+#=======Adding Offset Segment=======#
+final_SPL_SC_Q$RT_o <- final_SPL_SC_Q$RT
+final_SPL_SC_Q$RT <- final_SPL_SC_Q$RT + 2000
+final_SPL_SC_S$RT_o <- final_SPL_SC_S$RT
+final_SPL_SC_S$RT <- final_SPL_SC_S$RT + 2000
+
+
+
+#After All filtering steps:===================
+filt_SPL_SC_acc <- accuracy_by_cond(data = Q_step2_3SD_SPL_SC, acc_conds = ALL_CONDS, within_subject = FALSE)
+filt_SPL_SC_acc_ind <- accuracy_by_cond(data = Q_step2_3SD_SPL_SC, acc_conds = ALL_CONDS, within_subject = TRUE)
+plot_acc(acc.data = filt_SPL_SC_acc, conds = c('GP', 'NG'), rounding_decimal = 2, title = "Filtered GP, NG Accuracy within Condition",within_subject = FALSE, by_id = TRUE)
+plot_acc(acc.data = filt_SPL_SC_acc, conds = c('MV', 'NMV'), rounding_decimal = 2, title = "Filtered MV, NMV Accuracy within Condition",within_subject = FALSE, by_id = TRUE)
+
+crit.rt <- crit_rt(data=S_step2_3SD_SPL_SC,segs = GP_CRIT, by_seg = TRUE, within_subject = TRUE)
+plot_crit_rt(data = S_step2_3SD_SPL_SC,segs = list(c('GP','seg06'), c('NG','seg07')), by_seg = TRUE, title = "Filtered GP, NG critical segs RT", within_subject = TRUE)
+
+plot_crit_rt(data = S_step2_3SD_SPL_SC,segs = list(c('GP','seg06'), c('NG','seg07')), by_seg = TRUE, title = "FILTERED GP, NG critical segs RT", within_subject = TRUE)
+
+#FILTERED GP seg06+seg07 (critical + posterior) vs NG seg07+seg08 (controls) RT
+rt_boxplot(data = final_SPL_SC_S, title = "",segs = list(c('GP','combined_crit'), c('NG','combined_crit')), by_seg = TRUE, within_subject = TRUE)
+rt_boxplot(data = final_SPL_SC_S, title = "",segs = list(c('GP','combined_crit'), c('NG','combined_crit')), by_seg = TRUE, within_subject = FALSE)
+
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED GP seg06 (critical segment) vs NG seg07 (control) RT",segs = list(c('GP','seg06'), c('NG','seg07')), by_seg = TRUE, within_subject = TRUE)
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED GP seg06 (critical segment) vs NG seg07 (control) RT",segs = list(c('GP','seg06'), c('NG','seg07')), by_seg = TRUE, within_subject = FALSE)
+
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED GP posterior (seg07) vs NG posterior (seg08) RT",segs = list(c('GP','seg07'),c('NG','seg08')), by_seg = TRUE, within_subject = TRUE)
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED GP posterior (seg07) vs NG posterior (seg08) RT",segs = list(c('GP','seg07'),c('NG','seg08')), by_seg = TRUE, within_subject = FALSE)
+
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED MV critical segment 1 (seg06) vs NMV control segment 1 (seg06) RT",segs = list(c('MV','seg06'), c('NMV','seg06')), by_seg = TRUE, within_subject = TRUE)
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED MV critical segment 1 (seg06) vs NMV control segment 1 (seg06) RT",segs = list(c('MV','seg06'), c('NMV','seg06')), by_seg = TRUE, within_subject = FALSE)
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED MV critical segment 2 (seg07) vs NMV control segment 2 (seg07) RT",segs = list(c('MV','seg07'), c('NMV','seg07')), by_seg = TRUE, within_subject = TRUE)
+rt_boxplot(data = final_SPL_SC_S, title = "FILTERED MV critical segment 2 (seg07) vs NMV control segment 2 (seg07) RT",segs = list(c('MV','seg07'), c('NMV','seg07')), by_seg = TRUE, within_subject = FALSE)
+rt_boxplot(data = final_SPL_SC_S, title = "",segs = list(c('MV','combined_crit'), c('NMV','combined_crit')), by_seg = TRUE, within_subject = TRUE)
+rt_boxplot(data = final_SPL_SC_S, title = "",segs = list(c('MV','combined_crit'), c('NMV','combined_crit')), by_seg = TRUE, within_subject = FALSE)
+
+#========Mean/SD/SE for question========#
+#Question Reaction Times
+SP_L_CB_12 <- subset(final_SPL_CB_Q, ID == "SP_L_CB_12" & Seg == "question")
+mean(SP_L_CB_12$RT_o)
+sd(NFB22_CB_04$RT_o)
+std.error(NFB22_CB_04$RT_o)
+
+ng_q_cb <- subset(final_SPL_CB_Q, CONDITION == "NG" & Seg == "question")
+mean(ng_q_cb$RT)
+sd(ng_q_cb$RT)
+std.error(ng_q_cb$RT)
+
+
+mv_q_cb <- subset(final_SPL_CB_Q, CONDITION == "MV" & Seg == "question")
+mean(mv_q_cb$RT)
+sd(mv_q_cb$RT)
+std.error(mv_q_cb$RT)
+
+nmv_q_cb <- subset(final_SPL_CB_Q, CONDITION == "NMV" & Seg == "question")
+mean(nmv_q_cb$RT)
+sd(nmv_q_cb$RT)
+std.error(nmv_q_cb$RT)
+
+fl_q_cb <- subset(final_SPL_CB_Q, CONDITION == "FILLER" & Seg == "question")
+mean(fl_q_cb$RT)
+sd(fl_q_cb$RT)
+std.error(fl_q_cb$RT)
+
+#========Mean/SD/SE for segments========#
+#Reaction Times
+#MEANS OF EACH LISTEING SEGMENT - BLIND
+
+gp_seg1_cb <- subset(final_SPL_CB_S, CONDITION == "GP" & Seg == "seg01")
+mean(gp_seg1_cb$RT_o)
+sd(gp_seg1_cb$RT_o)
+std.error(gp_seg1_cb$RT_o)
+
+
+gp_seg2_cb <- subset(final_SPL_CB_S, CONDITION == "GP" & Seg == "seg02")
+mean(gp_seg2_cb$RT_o)
+sd(gp_seg2_cb$RT_o)
+std.error(gp_seg2_cb$RT_o)
+
+
+gp_seg3_cb <- subset(final_SPL_CB_S, CONDITION == "GP" & Seg == "seg03")
+mean(gp_seg3_cb$RT_o)
+sd(gp_seg3_cb$RT_o)
+std.error(gp_seg3_cb$RT_o)
+
+
+gp_seg4_cb <- subset(final_SPL_CB_S, CONDITION == "GP" & Seg == "seg04")
+mean(gp_seg4_sc$RT_o)
+sd(gp_seg4_cb$RT_o)
+std.error(gp_seg4_cb$RT_o)
+
+
+gp_seg5_cb <- subset(final_SPL_CB_S, CONDITION == "GP" & Seg == "seg05")
+mean(gp_seg5_cb$RT_o)
+sd(gp_seg5_cb$RT_o)
+std.error(gp_seg5_cb$RT_o)
+
+
+gp_seg6_cb <- subset(final_SPL_CB_S, CONDITION == "GP" & Seg == "seg06")
+mean(gp_seg6_cb$RT_o)
+sd(gp_seg6_cb$RT_o)
+std.error(gp_seg6_cb$RT_o)
+
+
+gp_seg7_cb <- subset(final_SPL_CB_S, CONDITION == "GP" & Seg == "seg07")
+mean(gp_seg7_cb$RT_o)
+sd(gp_seg7_cb$RT_o)
+std.error(gp_seg7_cb$RT_o)
+
+
+ng_seg1_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg01")
+mean(ng_seg1_cb$RT_o)
+sd(ng_seg1_cb$RT_o)
+std.error(ng_seg1_cb$RT_o)
+
+
+ng_seg2_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg02")
+mean(ng_seg2_cb$RT_o)
+sd(ng_seg2_cb$RT_o)
+std.error(ng_seg2_cb$RT_o)
+
+
+ng_seg3_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg03")
+mean(ng_seg3_cb$RT_o)
+sd(ng_seg3_cb$RT_o)
+std.error(ng_seg3_cb$RT_o)
+
+
+ng_seg4_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg04")
+mean(ng_seg4_cb$RT_o)
+sd(ng_seg4_cb$RT_o)
+std.error(ng_seg4_cb$RT_o)
+
+
+ng_seg5_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg05")
+mean(ng_seg5_cb$RT_o)
+sd(ng_seg5_cb$RT_o)
+std.error(ng_seg5_cb$RT_o)
+
+
+ng_seg6_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg06")
+mean(ng_seg6_cb$RT_o)
+sd(ng_seg6_cb$RT_o)
+std.error(ng_seg6_cb$RT_o)
+
+
+ng_seg7_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg07")
+mean(ng_seg7_cb$RT_o)
+sd(ng_seg7_cb$RT_o)
+std.error(ng_seg7_cb$RT_o)
+
+
+ng_seg8_cb <- subset(final_SPL_CB_S, CONDITION == "NG" & Seg == "seg08")
+mean(ng_seg8_cb$RT_o)
+sd(ng_seg8_cb$RT_o)
+std.error(ng_seg8_cb$RT_o)
+
+
+
+
+mv_seg6_cb <- subset(final_SPL_CB_S, CONDITION == "MV" & Seg == "seg06")
+mean(mv_seg6_cb$RT_o)
+sd(mv_seg6_cb$RT_o)
+std.error(mv_seg6_cb$RT_o)
+
+
+mv_seg7_cb <- subset(final_SPL_CB_S, CONDITION == "MV" & Seg == "seg07")
+mean(mv_seg7_cb$RT_o)
+sd(mv_seg7_cb$RT_o)
+std.error(mv_seg7_cb$RT_o)
+
+
+mv_seg8_cb <- subset(final_SPL_CB_S, CONDITION == "MV" & Seg == "seg08")
+mean(mv_seg8_cb$RT_o)
+sd(mv_seg8_cb$RT_o)
+std.error(mv_seg8_cb$RT_o)
+
+nmv_seg6_cb <- subset(final_SPL_CB_S, CONDITION == "NMV" & Seg == "seg06")
+mean(nmv_seg6_cb$RT_o)
+sd(nmv_seg6_cb$RT_o)
+std.error(nmv_seg6_cb$RT_o)
+
+
+nmv_seg7_cb <- subset(final_SPL_CB_S, CONDITION == "NMV" & Seg == "seg07")
+mean(nmv_seg7_cb$RT_o)
+sd(nmv_seg7_cb$RT_o)
+std.error(nmv_seg7_cb$RT_o)
+
+
+nmv_seg8_cb <- subset(final_SPL_CB_S, CONDITION == "NMV" & Seg == "seg08")
+mean(nmv_seg8_cb$RT_o)
+sd(nmv_seg8_cb$RT_o)
+std.error(nmv_seg8_cb$RT_o)
+
+#MEANS OF EACH LISTEING SEGMENT - SIGHTED
+
+gp_seg1_sc <- subset(final_SPL_SC_S, CONDITION == "GP" & Seg == "seg01")
+mean(gp_seg1_sc$RT_o)
+sd(gp_seg1_sc$RT_o)
+std.error(gp_seg1_sc$RT_o)
+
+
+gp_seg2_sc <- subset(final_SPL_SC_S, CONDITION == "GP" & Seg == "seg02")
+mean(gp_seg2_sc$RT_o)
+sd(gp_seg2_sc$RT_o)
+std.error(gp_seg2_sc$RT_o)
+
+
+gp_seg3_sc <- subset(final_SPL_SC_S, CONDITION == "GP" & Seg == "seg03")
+mean(gp_seg3_sc$RT_o)
+sd(gp_seg3_sc$RT_o)
+std.error(gp_seg3_sc$RT_o)
+
+
+gp_seg4_sc <- subset(final_SPL_SC_S, CONDITION == "GP" & Seg == "seg04")
+mean(gp_seg4_sc$RT_o)
+sd(gp_seg4_sc$RT_o)
+std.error(gp_seg4_sc$RT_o)
+
+
+gp_seg5_sc <- subset(final_SPL_SC_S, CONDITION == "GP" & Seg == "seg05")
+mean(gp_seg5_sc$RT_o)
+sd(gp_seg5_sc$RT_o)
+std.error(gp_seg5_sc$RT_o)
+
+
+gp_seg6_sc <- subset(final_SPL_SC_S, CONDITION == "GP" & Seg == "seg06")
+mean(gp_seg6_sc$RT_o)
+sd(gp_seg6_sc$RT_o)
+std.error(gp_seg6_sc$RT_o)
+
+
+gp_seg7_sc <- subset(final_SPL_SC_S, CONDITION == "GP" & Seg == "seg07")
+mean(gp_seg7_sc$RT_o)
+sd(gp_seg7_sc$RT_o)
+std.error(gp_seg7_sc$RT_o)
+
+
+ng_seg1_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg01")
+mean(ng_seg1_sc$RT_o)
+sd(ng_seg1_sc$RT_o)
+std.error(ng_seg1_sc$RT_o)
+
+
+ng_seg2_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg02")
+mean(ng_seg2_sc$RT_o)
+sd(ng_seg2_sc$RT_o)
+std.error(ng_seg2_sc$RT_o)
+
+
+ng_seg3_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg03")
+mean(ng_seg3_sc$RT_o)
+sd(ng_seg3_sc$RT_o)
+std.error(ng_seg3_sc$RT_o)
+
+
+ng_seg4_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg04")
+mean(ng_seg4_sc$RT_o)
+sd(ng_seg4_sc$RT_o)
+std.error(ng_seg4_sc$RT_o)
+
+
+ng_seg5_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg05")
+mean(ng_seg5_sc$RT_o)
+sd(ng_seg5_sc$RT_o)
+std.error(ng_seg5_sc$RT_o)
+
+
+ng_seg6_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg06")
+mean(ng_seg6_sc$RT_o)
+sd(ng_seg6_sc$RT_o)
+std.error(ng_seg6_sc$RT_o)
+
+
+ng_seg7_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg07")
+mean(ng_seg7_sc$RT_o)
+sd(ng_seg7_sc$RT_o)
+std.error(ng_seg7_sc$RT_o)
+
+
+ng_seg8_sc <- subset(final_SPL_SC_S, CONDITION == "NG" & Seg == "seg08")
+mean(ng_seg8_sc$RT_o)
+sd(ng_seg8_sc$RT_o)
+std.error(ng_seg8_sc$RT_o)
+
+
+
+
+mv_seg6_sc <- subset(final_SPL_SC_S, CONDITION == "MV" & Seg == "seg06")
+mean(mv_seg6_sc$RT_o)
+sd(mv_seg6_sc$RT_o)
+std.error(mv_seg6_sc$RT_o)
+
+
+mv_seg7_sc <- subset(final_SPL_SC_S, CONDITION == "MV" & Seg == "seg07")
+mean(mv_seg7_sc$RT_o)
+sd(mv_seg7_sc$RT_o)
+std.error(mv_seg7_sc$RT_o)
+
+
+mv_seg8_sc <- subset(final_SPL_SC_S, CONDITION == "MV" & Seg == "seg08")
+mean(mv_seg8_sc$RT_o)
+sd(mv_seg8_sc$RT_o)
+std.error(mv_seg8_sc$RT_o)
+
+nmv_seg6_sc <- subset(final_SPL_SC_S, CONDITION == "NMV" & Seg == "seg06")
+mean(nmv_seg6_sc$RT_o)
+sd(nmv_seg6_sc$RT_o)
+std.error(nmv_seg6_sc$RT_o)
+
+
+nmv_seg7_sc <- subset(final_SPL_SC_S, CONDITION == "NMV" & Seg == "seg07")
+mean(nmv_seg7_sc$RT_o)
+sd(nmv_seg7_sc$RT_o)
+std.error(nmv_seg7_sc$RT_o)
+
+
+nmv_seg8_sc <- subset(final_SPL_SC_S, CONDITION == "NMV" & Seg == "seg08")
+mean(nmv_seg8_sc$RT_o)
+sd(nmv_seg8_sc$RT_o)
+std.error(nmv_seg8_sc$RT_o)
+
+#========Statistical Analisis========#
+
+# load package
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+## Logit model for accuracy
+
+acc_CB_q_gp <- subset(final_SPL_CB_Q, (CONDITION == 'GPLG' | CONDITION == 'NGLG') & Seg == "question")
+
+acc_CB_q_mv <- subset(final_SPL_CB_Q, (CONDITION == 'MOVE' | CONDITION == 'NO-MOVE') & Seg == "question")
+
+
+
+filt_GPLG_glm_cb <- glmer(Correct ~ CONDITION + (1|Item) + (1|ID), 
+                          data=acc_CB_q_gp, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+filt_GPLG_glm_CB_null <- glmer(Correct ~ 1 + (1|Item) + (1|ID), 
+                               data=acc_CB_q_gp, family=binomial(link="logit"),
+                               control = glmerControl(optimizer = "bobyqa"))
+
+summary(filt_GPLG_glm_cb)
+
+summary(filt_GPLG_glm_CB_null)
+
+anova(filt_GPLG_glm_cb,filt_GPLG_glm_CB_null)
+
+
+filt_MOVE_glm_cb <- glmer(Correct ~ CONDITION + (1|Item) + (1|ID), 
+                          data=acc_CB_q_mv, family=binomial(link="logit"),
+                          control = glmerControl(optimizer = "bobyqa"))
+
+
+
+summary(filt_MOVE_glm_cb)
+
+# load package
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+tab_model(filt_GPLG_glm_cb, title = "Table of results of the Generalized Linear Model for Accuracy of the GP vs NGP Comparison - Sighted Control Participants")
+
+#LMER to Question RT 
+
+summary(mod.acur.MV)
+
+mod.mv3_comp <- lmer(RT ~ CONDITION*Group + (1|ID) + (1|Item), data = MOVE3_comp, REML = FALSE)
+
+anova(mod.mv_comp, mod.nullmv_comp)
+
+summary(mod.mv3_comp)
+
+tab_model(mod.seg1_comp, title = "Table of Results of the Linear Model for Seg 01 Reaction Times to the GP and NGP Questions - Comparison Between Congenitally Blind and Sighted Matched Participants", file = "seg1_rt_comp.doc")
+
+#LMER to Segments RT 
+
+summary(mod.acur.MV)
+
+mod.mv3_comp <- lmer(RT ~ CONDITION*Group + (1|ID) + (1|Item), data = MOVE3_comp, REML = FALSE)
+
+anova(mod.mv_comp, mod.nullmv_comp)
+
+summary(mod.mv3_comp)
+
+tab_model(mod.seg1_comp, title = "Table of Results of the Linear Model for Seg 01 Reaction Times to the GP and NGP Questions - Comparison Between Congenitally Blind and Sighted Matched Participants", file = "seg1_rt_comp.doc")
